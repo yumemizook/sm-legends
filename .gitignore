@@ -1,0 +1,45 @@
+# Build
+build/
+out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+_deps/
+*.cmake
+
+# Local Build Artifacts
+build_log*.txt
+build_output.txt
+settings.cfg
+charts/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln
+*.vcxproj*
+.idea/
+*.iws
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# vcpkg
+vcpkg/
+vcpkg_installed/
+
+# Compiled objects
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.a
+*.pdb
+*.exp
+*.ilk

@@ -1,0 +1,6 @@
+﻿MSBuild version 17.14.40+3e7442088 for .NET Framework
+
+  sm_engine.vcxproj -> D:\project stuff\sm-legends\build\Debug\sm_engine.lib
+  GameWindow.cpp
+  sm_gui.vcxproj -> D:\project stuff\sm-legends\build\Debug\sm_gui.lib
+  sm-legends-gui.vcxproj -> D:\project stuff\sm-legends\build\Debug\sm-legends-gui.exe

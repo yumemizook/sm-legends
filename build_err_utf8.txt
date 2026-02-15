@@ -1,0 +1,43 @@
+﻿MSBuild version 17.14.40+3e7442088 for .NET Framework
+
+  sm_engine.vcxproj -> D:\project stuff\sm-legends\build\Debug\sm_engine.lib
+  GameWindow.cpp
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+D:\project stuff\sm-legends\src\gui\GameWindow.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\timing\Conductor.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\timing\TimingData.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\parsing\Simfile.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\parsing\NoteChart.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\rendering\NoteRenderer.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\parsing\SongScanner.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\parsing\SimfileParser.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\audio\AudioEngine.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\input\InputMapper.h(1,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  (compiling source file '../src/gui/GameWindow.cpp')
+  
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(1155,50): error C2039: 'filepath': is not a member of 'sml::Simfile' [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+      D:\project stuff\sm-legends\src\parsing\Simfile.h(17,8):
+      see declaration of 'sml::Simfile'
+  
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(1385,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(2050,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(2693,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(3316,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
