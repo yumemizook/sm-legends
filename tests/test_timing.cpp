@@ -336,8 +336,20 @@ static void TestOffset() {
     // Positive offset = music starts 0.1s before beat 0
     // So beat 0 is at audio time 0.1s (since start_time = -offset = -0.1)
     // Actually: start_time = -offset => if offset = 0.1, start_time = -0.1
-    // So at time 0.0, we're 0.1s into the timeline:
-    // beat = 0.0 + (0.0 - (-0.1)) * (120/60) = 0.0 + 0.1 * 2 = 0.2
+    // So at time 0.0, we're 0.1s before the first beat (beat 0)
+    // beat = 0.0 + (0.0 - (-(-0.1))) ... Wait.
+    // start_time = -offset. If offset = 0.1, start_time = -0.1.
+    // TimeToBeat(t) = start_beat + (t - start_time) * (BPM/60)
+    // At t=0.0: beat = 0.0 + (0.0 - (-0.1)) * (120/60) = 0.2? 
+    // Wait, the SM convention is: Time = Beat_Time - Offset.
+    // So Beat_Time = Time + Offset.
+    // At Time 0, Beat_Time = Offset.
+    // If BPM is 120 (2 beats/sec), and Beat_Time is 0.1s, then beat = 0.2.
+    // My previous thought was: Offset    // Positive offset = music starts 0.1s before beat 0 (No).
+    // SM Convention: Beat 0 Time = -Offset.
+    // Initialize(..., 0.1). Offset = 0.1. Beat 0 at -0.1s.
+    // At Time 0.0, we are 0.1s past Beat 0.
+    // 0.1s at 120BPM (0.5s/beat) = 0.2 beats.
     conductor.Initialize(bpms, stops, scrolls, 0.1);
 
     ASSERT_APPROX(conductor.TimeToBeat(0.0), 0.2);

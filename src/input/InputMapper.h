@@ -172,6 +172,10 @@ public:
     /// Uses sensible defaults based on SM conventions.
     void Configure(const std::string& chart_type, int num_columns);
 
+    /// Configure for a specific player (0 = P1, 1 = P2).
+    /// P2 gets alternate keybindings (Arrow keys, Numpad) for versus mode.
+    void ConfigureForPlayer(const std::string& chart_type, int num_columns, int player_idx);
+
     /// Set custom key bindings (overrides defaults).
     void SetBindings(const std::vector<KeyBinding>& bindings);
 
@@ -270,7 +274,7 @@ inline void InputMapper::Configure(const std::string& chart_type, int num_column
         key_to_column_[keys[i]] = static_cast<int>(i);
     }
 
-    // Also support alternative keys for 4-key
+    // Also support alternative keys for 4-key and 8-key
     if (num_columns == 4) {
         // Arrow keys: Left Down Up Right (DDR convention)
         key_to_column_[SDLK_LEFT]  = 0;
@@ -283,6 +287,24 @@ inline void InputMapper::Configure(const std::string& chart_type, int num_column
         key_to_column_[SDLK_x]      = 1;
         key_to_column_[SDLK_PERIOD] = 2;
         key_to_column_[SDLK_SLASH]  = 3;
+    } else if (num_columns == 8) {
+        // P1: WASD (Standard Arrangement)
+        key_to_column_[SDLK_a] = 0; // Left
+        key_to_column_[SDLK_s] = 1; // Down
+        key_to_column_[SDLK_w] = 2; // Up
+        key_to_column_[SDLK_d] = 3; // Right
+
+        // P2: Arrow keys
+        key_to_column_[SDLK_LEFT]  = 4;
+        key_to_column_[SDLK_DOWN]  = 5;
+        key_to_column_[SDLK_UP]    = 6;
+        key_to_column_[SDLK_RIGHT] = 7;
+
+        // Numpad Support for P2 (4 2 8 6)
+        key_to_column_[SDLK_KP_4] = 4;
+        key_to_column_[SDLK_KP_2] = 5;
+        key_to_column_[SDLK_KP_8] = 6;
+        key_to_column_[SDLK_KP_6] = 7;
     }
 }
 
@@ -290,6 +312,54 @@ inline void InputMapper::SetBindings(const std::vector<KeyBinding>& bindings) {
     key_to_column_.clear();
     for (const auto& b : bindings) {
         key_to_column_[b.key] = b.column;
+    }
+}
+
+inline void InputMapper::ConfigureForPlayer(const std::string& chart_type, int num_columns, int player_idx) {
+    if (player_idx == 0) {
+        // P1: use standard bindings but WITHOUT the alt arrow keys (those belong to P2)
+        key_to_column_.clear();
+        num_columns_ = num_columns;
+        lanes_.resize(static_cast<size_t>(num_columns));
+        Reset();
+
+        if (num_columns == 4) {
+            // P1: DFJK + ZX./
+            key_to_column_[SDLK_d]      = 0;
+            key_to_column_[SDLK_f]      = 1;
+            key_to_column_[SDLK_j]      = 2;
+            key_to_column_[SDLK_k]      = 3;
+            key_to_column_[SDLK_z]      = 0;
+            key_to_column_[SDLK_x]      = 1;
+            key_to_column_[SDLK_PERIOD] = 2;
+            key_to_column_[SDLK_SLASH]  = 3;
+        } else {
+            Configure(chart_type, num_columns); // Fallback for non-4-key
+        }
+    } else {
+        // P2: arrow keys + numpad
+        key_to_column_.clear();
+        num_columns_ = num_columns;
+        lanes_.resize(static_cast<size_t>(num_columns));
+        Reset();
+
+        if (num_columns == 4) {
+            // Arrow keys (DDR convention: Left Down Up Right)
+            key_to_column_[SDLK_LEFT]  = 0;
+            key_to_column_[SDLK_DOWN]  = 1;
+            key_to_column_[SDLK_UP]    = 2;
+            key_to_column_[SDLK_RIGHT] = 3;
+            // Numpad (4 2 8 6)
+            key_to_column_[SDLK_KP_4]  = 0;
+            key_to_column_[SDLK_KP_2]  = 1;
+            key_to_column_[SDLK_KP_8]  = 2;
+            key_to_column_[SDLK_KP_6]  = 3;
+        } else {
+            // For non-4-key, P2 uses numpad 1-9
+            for (int i = 0; i < num_columns && i < 9; ++i) {
+                key_to_column_[static_cast<SDL_Keycode>(SDLK_KP_1 + i)] = i;
+            }
+        }
     }
 }
 

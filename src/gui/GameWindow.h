@@ -31,6 +31,7 @@
 #include <vector>
 #include <memory>
 #include <map>
+#include <cstring>
 
 #include "timing/Conductor.h"
 #include "parsing/Simfile.h"
@@ -41,6 +42,7 @@
 #include "input/InputMapper.h"
 #include "gameplay/LifeMeter.h"
 #include "gui/FontManager.h"
+#include "core/Profile.h"
 
 #include "gui/Color.h"
 
@@ -62,7 +64,11 @@ namespace LaneColors {
 
 /// Current screen state
 enum class ScreenState {
+    ATTRACTION,
+    PROFILE_LOAD,
+    PROFILE_MANAGE,
     SONG_SELECT,
+    DECIDE,
     GAMEPLAY,
     RESULTS,
     OPTIONS,
@@ -114,6 +120,91 @@ struct HitRecord {
     bool is_ex_grade;  ///< Whether this was graded using EX standards (stored for reference)
 };
 
+/// Per-player state for 2P support
+struct PlayerState {
+    bool   joined     = false;  ///< Whether this player slot is active
+    int    player_num = 0;      ///< 0 = P1, 1 = P2
+
+    // Input
+    InputMapper input;
+
+    // Profile
+    Profile profile;
+
+    // Scoring
+    int    combo      = 0;
+    int    max_combo  = 0;
+    int    total_hits = 0;
+    int    total_miss = 0;
+    int    normal_judge_counts[9] = {};
+    int    ex_judge_counts[9]     = {};
+    double normal_score = 0.0;
+    double ex_score     = 0.0;
+    LifeMeter life_meter;
+    ClearType clear_type = ClearType::NONE;
+    Judgement lowest_judgement_in_combo = Judgement::NONE;
+    int    total_hittable_notes = 0;
+
+    // Floating judgement display
+    Judgement last_judgement      = Judgement::NONE;
+    double    judgement_timer     = 0.0;
+    double    last_timing_error   = 0.0;
+
+    // Hit detection
+    size_t next_hittable_note      = 0;
+    std::vector<uint32_t> note_hit_masks;
+    std::vector<double>   row_best_error;
+
+    // Hit flash silhouettes
+    std::vector<HitFlash> hit_flashes;
+
+    // Records
+    std::vector<HitRecord> hit_history;
+
+    // Fail sequence
+    bool   failed_sequence      = false;
+    double fail_animation_timer = 0.0;
+
+    // Visual polish
+    double combo_pop_timer       = 0.0;
+    int    last_grade_milestone  = 0;
+    double grade_popup_timer     = 0.0;
+    const char* grade_popup_str  = "";
+
+    // NoteFieldConfig per-player (for split screen)
+    NoteFieldConfig field_config;
+    int field_x_offset = 0; ///< Horizontal pixel offset for this player's notefield
+
+    /// Reset all gameplay state for a new chart
+    void ResetGameplay() {
+        combo = 0;
+        max_combo = 0;
+        total_hits = 0;
+        total_miss = 0;
+        normal_score = 0.0;
+        ex_score = 0.0;
+        last_judgement = Judgement::NONE;
+        judgement_timer = 0.0;
+        last_timing_error = 0.0;
+        last_grade_milestone = 0;
+        grade_popup_timer = 0.0;
+        failed_sequence = false;
+        fail_animation_timer = 0.0;
+        clear_type = ClearType::ALL_PERFECT_EXTRAORDINARY;
+        lowest_judgement_in_combo = Judgement::NONE;
+        combo_pop_timer = 0.0;
+        next_hittable_note = 0;
+        total_hittable_notes = 0;
+        note_hit_masks.clear();
+        row_best_error.clear();
+        hit_flashes.clear();
+        hit_history.clear();
+        std::memset(normal_judge_counts, 0, sizeof(normal_judge_counts));
+        std::memset(ex_judge_counts, 0, sizeof(ex_judge_counts));
+        input.Reset();
+    }
+};
+
 /// Simple SDL2 test window for the VSRG engine.
 class GameWindow {
 public:
@@ -132,6 +223,8 @@ private:
     void HandleEvents();
     void HandleKeyDown(SDL_Keycode key);
     void HandleKeyUp(SDL_Keycode key);
+    void HandleKeyDown_Attraction(SDL_Keycode key);
+    void HandleKeyDown_ProfileLoad(SDL_Keycode key);
     void HandleKeyDown_SongSelect(SDL_Keycode key);
     void HandleKeyDown_Gameplay(SDL_Keycode key);
     void HandleKeyUp_Gameplay(SDL_Keycode key);
@@ -146,14 +239,36 @@ private:
     void Update(double dt);
     void ChangeScreen(ScreenState next);
     
-    void UpdateScores(double abs_error, int num_notes);
-    void UpdateClearType(Judgement j_norm, Judgement j_ex);
+    void UpdateScores(double abs_error, int num_notes, int player_idx = 0);
+    void UpdateClearType(Judgement j_norm, Judgement j_ex, int player_idx = 0);
 
     // --- Hit detection ---
-    void ProcessLaneHit(int lane, double forced_time = -1.0);
+    void ProcessLaneHit(int lane, double forced_time = -1.0, int player_idx = 0);
 
     // --- Rendering: dispatch ---
     void Render();
+
+    // --- Rendering: Attraction / Profile Load / Profile Manage ---
+    void RenderAttraction();
+    void RenderProfileLoad();
+    void RenderProfileManage();
+    void UpdateAttraction(double dt);
+    void UpdateProfileLoad(double dt);
+    void HandleKeyDown_ProfileManage(SDL_Keycode key);
+
+    // --- Profile helpers ---
+    void ScanLocalProfiles();
+    void SaveActiveProfile(int player_idx);
+    void ApplyProfileMods(int player_idx);
+    
+    struct RatingStyle {
+        Color main_color;
+        Color outline_color;
+        bool  is_rainbow = false;
+        int   rainbow_type = 0; // 0=none, 1=rainbow, 2=rainbow2
+    };
+    RatingStyle GetRatingStyle(double rating);
+    void RenderRating(int x, int y, double rating, TextAlign align, bool is_p2);
 
     // --- Rendering: Song Select ---
     void RenderSongSelect();
@@ -163,6 +278,7 @@ private:
     void RenderSongSelectHUD();
 
     // --- Rendering: Gameplay ---
+    void RenderDecide();
     void RenderGameplay();
     void RenderBackground();
     void RenderLanes();
@@ -192,8 +308,12 @@ private:
     void StartGameplay(size_t song_index, size_t chart_index);
     void StartGameplayDirect();
     void HandleKeyDown_ModifierMenu(SDL_Keycode key);
+    void HandleModifierMenuInput(SDL_Keycode key);
     void ReturnToSongSelect();
     void ShowResults();
+    void JoinPlayer(int player_idx);
+    void UnjoinPlayer(int player_idx);
+    void SetupPlayerFieldLayout();
 
     // --- Audio helpers ---
     bool TryLoadSongAudio();
@@ -220,6 +340,7 @@ private:
     int GetLaneWidth() const;
     int GetFieldLeft() const;
     int GetFieldRight() const;
+    static std::string GetChartModeName(const std::string& type);
 
     // --- Color helpers ---
     static Color GetDifficultyColor(const std::string& diff_name);
@@ -231,12 +352,24 @@ private:
     SDL_Renderer* renderer_ = nullptr;
     bool          fullscreen_ = true;
     bool          running_  = false;
-    ScreenState   screen_   = ScreenState::SONG_SELECT;
+    ScreenState   screen_   = ScreenState::ATTRACTION;
+
+    // --- 2P Player State ---
+    static constexpr int MAX_PLAYERS = 2;
+    PlayerState players_[MAX_PLAYERS];
+    int num_active_players_ = 0; ///< How many players have joined (0-2)
+    int active_player_idx_  = 0; ///< Currently active player for single-player compat
+
+    /// Helper: get the "current" player (P1 by default)
+    PlayerState& P1() { return players_[0]; }
+    PlayerState& P2() { return players_[1]; }
+    const PlayerState& P1() const { return players_[0]; }
+    const PlayerState& P2() const { return players_[1]; }
 
     // Subsystems
     SongScanner  scanner_;
     AudioEngine  audio_;
-    InputMapper  input_;
+    InputMapper  input_;  ///< Legacy: still used for calibration/options. Players use players_[i].input
     FontManager  font_;
     SDL_GameController* controller_ = nullptr;
 
@@ -321,7 +454,7 @@ private:
     bool   playing_      = false;
     bool   audio_loaded_  = false;
     double play_time_    = 0.0;
-    double last_tick_    = 0.0;
+    uint64_t last_tick_  = 0;
     double song_duration_ = 0.0;
     bool   show_debug_   = true;
     bool   ex_mode_      = false;
@@ -345,7 +478,7 @@ private:
         if (!current_chart_ || row_idx >= current_chart_->note_rows.size()) return 0;
         int count = 0;
         for (auto nt : current_chart_->note_rows[row_idx].columns) {
-            if (nt == NoteType::Tap || nt == NoteType::HoldHead || nt == NoteType::RollHead)
+            if (IsTap(nt))
                 count++;
         }
         return count;
@@ -357,7 +490,7 @@ private:
         uint32_t mask = 0;
         const auto& cols = current_chart_->note_rows[row_idx].columns;
         for (size_t c = 0; c < cols.size(); ++c) {
-            if (cols[c] == NoteType::Tap || cols[c] == NoteType::HoldHead || cols[c] == NoteType::RollHead)
+            if (IsTap(cols[c]))
                 mask |= (1u << c);
         }
         return mask;
@@ -370,7 +503,8 @@ private:
         return (note_hit_masks_[row_idx] & required) == required;
     }
 
-    // Combo/score
+    // Combo/score — LEGACY: These are kept for backward compat during refactoring.
+    // New code should use players_[i].combo, players_[i].normal_score, etc.
     int    combo_      = 0;
     int    max_combo_  = 0;
     int    total_hits_ = 0;
@@ -409,10 +543,13 @@ private:
     bool        results_ex_mode_ = false;
     std::vector<HitRecord> hit_history_;
 
+    // Decide screen state
+    double      decide_timer_ = 0.0;
+
     // Polish Effects
     double transition_timer_    = 0.0;
     double transition_duration_ = 0.4;
-    ScreenState next_screen_    = ScreenState::SONG_SELECT;
+    ScreenState next_screen_    = ScreenState::ATTRACTION;
     bool is_transitioning_      = false;
 
     double combo_pop_timer_     = 0.0;
@@ -433,6 +570,31 @@ private:
     };
     std::map<std::string, ScoreRecord> high_scores_; // key: filepath + "|" + chart_index
 
+    // --- Attraction / Profile Load state ---
+    double attraction_timer_     = 0.0;  ///< Animation timer for title screen
+    double usb_poll_timer_       = 0.0;  ///< Periodic USB check timer
+    static constexpr double USB_POLL_INTERVAL = 1.0; ///< Check USB every 1 second
+
+    /// USB drive letter mapping: P1 = drive_map_[0], P2 = drive_map_[1]
+    char drive_map_[2] = { 'E', 'F' };
+
+    /// Profile load screen state per player
+    struct ProfileLoadState {
+        bool   ready      = false;  ///< Player has confirmed profile
+        int    cursor     = 0;      ///< Menu cursor position
+        bool   usb_found  = false;  ///< USB profile detected
+        std::string usb_name;       ///< Name from USB profile
+        std::vector<std::string> local_profiles; ///< Scanned local profiles
+    };
+    ProfileLoadState profile_load_state_[MAX_PLAYERS];
+
+    // --- Profile management state ---
+    std::vector<std::string> local_profile_names_;  ///< Scanned local profile names
+    int profile_manage_cursor_ = 0;   ///< Cursor in profile management list
+    int profile_manage_player_ = 0;   ///< Which player is managing their profile
+    bool profile_manage_creating_ = false; ///< In name entry mode
+    std::string profile_manage_new_name_;  ///< Name being typed for new profile
+
     // Window dimensions
     int width_  = 900;
     int height_ = 700;
@@ -442,6 +604,12 @@ private:
     static constexpr int RECEPTOR_HEIGHT = 16; // SMX-style bracket receptors need more room
     static constexpr int NOTE_HEIGHT = 14;
     static constexpr int FIELD_MARGIN = 200;
+
+    // Per-player rendering offset (set before each player's render pass)
+    int render_x_offset_ = 0;  ///< Horizontal offset applied to notefield for current player
+    int render_player_idx_ = 0; ///< Which player index is currently being rendered
+
+    bool center_1p_ = false;   ///< If true, 1P notefield is centered instead of side-aligned
 };
 
 /// Generate a built-in test chart.

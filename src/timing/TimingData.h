@@ -127,6 +127,16 @@ enum class NoteType : uint8_t {
     Mine      = 'M',    ///< Mine (avoid hitting)
     Lift      = 'L',    ///< Lift note (release)
     Fake      = 'F',    ///< Fake note (cosmetic only, not scored)
+
+    // Internal types for Routine/Pseudo-Routine
+    TapP1     = 0x81,   ///< Force P1 coloring (Red)
+    TapP2     = 0x82    ///< Force P2 coloring (Blue)
 };
+
+/// Helper to check if a NoteType is any form of Tap (Hittable note)
+inline bool IsTap(NoteType t) {
+    return t == NoteType::Tap || t == NoteType::TapP1 || t == NoteType::TapP2 ||
+           t == NoteType::HoldHead || t == NoteType::RollHead || t == NoteType::Lift;
+}
 
 } // namespace sml

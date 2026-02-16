@@ -85,8 +85,8 @@ private:
     bool        finished_      = false;
 
     // Timing tracking
-    double      play_start_ticks_ = 0.0;  ///< SDL_GetTicks value when Play() was called
-    double      pause_ticks_   = 0.0;     ///< SDL_GetTicks when paused
+    uint64_t    play_start_perf_ = 0;  ///< SDL_GetPerformanceCounter when Play() was called
+    uint64_t    pause_perf_      = 0;  ///< SDL_GetPerformanceCounter when paused
     double      offset_        = 0.0;     ///< Simfile offset adjustment
     double      seek_offset_   = 0.0;     ///< Accumulated seek offsets
 

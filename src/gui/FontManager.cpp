@@ -30,7 +30,7 @@ bool FontManager::LoadFont(const std::string& name, const std::string& fontPath)
     
     // Pre-load common sizes for the new font
     std::vector<FontSize> sizes = { 
-        FontSize::SMALL, FontSize::MEDIUM, FontSize::LARGE, FontSize::HUGE, FontSize::TITLE 
+        FontSize::SMALL, FontSize::MEDIUM, FontSize::LARGE, FontSize::HUGE, FontSize::TITLE, FontSize::GIANT
     };
 
     bool success = false;
@@ -82,7 +82,16 @@ void FontManager::DrawText(SDL_Renderer* renderer, int x, int y,
     if (align == TextAlign::CENTER) cur_x -= scaled_total_w / 2;
     else if (align == TextAlign::RIGHT) cur_x -= scaled_total_w;
 
-    for (char ch : text) {
+    size_t i = 0;
+    while (i < text.length()) {
+        std::string ch;
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c < 0x80) { ch = text.substr(i, 1); i += 1; }
+        else if ((c & 0xE0) == 0xC0) { ch = text.substr(i, 2); i += 2; }
+        else if ((c & 0xF0) == 0xE0) { ch = text.substr(i, 3); i += 3; }
+        else if ((c & 0xF8) == 0xF0) { ch = text.substr(i, 4); i += 4; }
+        else { i++; continue; }
+
         SDL_Texture* tex = GetGlyphTexture(renderer, ch, size, color, fontName, 0);
         if (!tex) continue;
 
@@ -108,13 +117,21 @@ void FontManager::DrawTextOutline(SDL_Renderer* renderer, int x, int y,
     if (align == TextAlign::CENTER) cur_x -= scaled_total_w / 2;
     else if (align == TextAlign::RIGHT) cur_x -= scaled_total_w;
 
-    for (char ch : text) {
+    size_t i = 0;
+    while (i < text.length()) {
+        std::string ch;
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c < 0x80) { ch = text.substr(i, 1); i += 1; }
+        else if ((c & 0xE0) == 0xC0) { ch = text.substr(i, 2); i += 2; }
+        else if ((c & 0xF0) == 0xE0) { ch = text.substr(i, 3); i += 3; }
+        else if ((c & 0xF8) == 0xF0) { ch = text.substr(i, 4); i += 4; }
+        else { i++; continue; }
+
         // Draw outline first
         SDL_Texture* out_tex = GetGlyphTexture(renderer, ch, size, outlineColor, fontName, thickness);
         if (out_tex) {
             int w, h;
             SDL_QueryTexture(out_tex, NULL, NULL, &w, &h);
-            // The outline texture is slightly larger, we need to center it on the glyph position
             int sw = static_cast<int>(w * scale);
             int sh = static_cast<int>(h * scale);
             SDL_Rect dst = { cur_x - static_cast<int>(thickness * scale), y - static_cast<int>(thickness * scale), sw, sh };
@@ -135,11 +152,11 @@ void FontManager::DrawTextOutline(SDL_Renderer* renderer, int x, int y,
     }
 }
 
-void FontManager::DrawMonoText(SDL_Renderer* renderer, int x, int y, 
-                             const std::string& text, Color color, 
-                             FontSize size, TextAlign align, double scale,
-                             const std::string& fontName, int cellWidth,
-                             bool useOutline, Color outlineColor) {
+void FontManager::DrawMonoText(SDL_Renderer* renderer, int x, int y, const std::string& text,
+                      Color color, FontSize size, TextAlign align,
+                      double scale, const std::string& fontName, int cellWidth,
+                      bool useOutline, Color outlineColor, int weight,
+                      int outlineThickness) {
     if (text.empty()) return;
     
     if (cellWidth <= 0) {
@@ -161,7 +178,6 @@ void FontManager::DrawMonoText(SDL_Renderer* renderer, int x, int y,
     
     Color actualOutline = outlineColor;
     if (outlineColor.r == 0 && outlineColor.g == 0 && outlineColor.b == 0 && outlineColor.a == 0) {
-        // Auto-dim: 50% brightness
         actualOutline = { 
             static_cast<uint8_t>(color.r / 2), 
             static_cast<uint8_t>(color.g / 2), 
@@ -170,9 +186,23 @@ void FontManager::DrawMonoText(SDL_Renderer* renderer, int x, int y,
         };
     }
 
-    for (char ch : text) {
+    size_t i = 0;
+    while (i < text.length()) {
+        std::string ch;
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c < 0x80) { ch = text.substr(i, 1); i += 1; }
+        else if ((c & 0xE0) == 0xC0) { ch = text.substr(i, 2); i += 2; }
+        else if ((c & 0xF0) == 0xE0) { ch = text.substr(i, 3); i += 3; }
+        else if ((c & 0xF8) == 0xF0) { ch = text.substr(i, 4); i += 4; }
+        else { i++; continue; }
+
+        // Find offsets for centering glyph in cell
+        int baseW = GetTextWidth(ch, size, fontName);
+        int scaledBaseW = static_cast<int>(baseW * scale);
+        int offsetX = (scaledCellW - scaledBaseW) / 2;
+
         if (useOutline) {
-            int thickness = 2;
+            int thickness = outlineThickness;
             SDL_Texture* out_tex = GetGlyphTexture(renderer, ch, size, actualOutline, fontName, thickness);
             if (out_tex) {
                 int w, h;
@@ -180,13 +210,20 @@ void FontManager::DrawMonoText(SDL_Renderer* renderer, int x, int y,
                 int sw = static_cast<int>(w * scale);
                 int sh = static_cast<int>(h * scale);
                 
-                // Base char width for centering
-                int baseW = GetTextWidth(std::string(1, ch), size, fontName);
-                int scaledBaseW = static_cast<int>(baseW * scale);
-                int offsetX = (scaledCellW - scaledBaseW) / 2;
+                int out_x = curX + offsetX - static_cast<int>(thickness * scale);
+                int out_y = y - static_cast<int>(thickness * scale);
 
-                SDL_Rect dst = { curX + offsetX - static_cast<int>(thickness * scale), y - static_cast<int>(thickness * scale), sw, sh };
-                SDL_RenderCopy(renderer, out_tex, NULL, &dst);
+                if (weight > 0) {
+                    for (int dx = -weight; dx <= weight; ++dx) {
+                        for (int dy = -weight; dy <= weight; ++dy) {
+                            SDL_Rect bold_out_dst = { out_x + dx, out_y + dy, sw, sh };
+                            SDL_RenderCopy(renderer, out_tex, NULL, &bold_out_dst);
+                        }
+                    }
+                } else {
+                    SDL_Rect dst = { out_x, out_y, sw, sh };
+                    SDL_RenderCopy(renderer, out_tex, NULL, &dst);
+                }
             }
         }
 
@@ -197,17 +234,29 @@ void FontManager::DrawMonoText(SDL_Renderer* renderer, int x, int y,
             int sw = static_cast<int>(w * scale);
             int sh = static_cast<int>(h * scale);
             
-            int offsetX = (scaledCellW - sw) / 2;
-            SDL_Rect dst = { curX + offsetX, y, sw, sh };
-            SDL_RenderCopy(renderer, tex, NULL, &dst);
+            int tx = curX + offsetX;
+            
+            if (weight > 0) {
+                for (int dx = -weight; dx <= weight; ++dx) {
+                    for (int dy = -weight; dy <= weight; ++dy) {
+                        SDL_Rect bold_dst = { tx + dx, y + dy, sw, sh };
+                        SDL_RenderCopy(renderer, tex, NULL, &bold_dst);
+                    }
+                }
+            } else {
+                SDL_Rect dst = { tx, y, sw, sh };
+                SDL_RenderCopy(renderer, tex, NULL, &dst);
+            }
         }
         curX += scaledCellW;
     }
 }
 
 void FontManager::DrawAccuracy(SDL_Renderer* renderer, int x, int y, 
-                              double accuracy, Color color, TextAlign align, double scale, int precision,
-                              bool useOutline, bool boldInteger, Color outlineColor) {
+                      double accuracy, Color color, TextAlign align, double scale, int precision,
+                      bool useOutline, bool boldInteger, Color outlineColor,
+                      FontSize integerSize, FontSize decimalSize,
+                      int boldWeight, int outlineThickness) {
     char buf[32];
     char fmt[16];
     std::snprintf(fmt, sizeof(fmt), "%%.%df%%%%", precision);
@@ -216,18 +265,18 @@ void FontManager::DrawAccuracy(SDL_Renderer* renderer, int x, int y,
     
     size_t dot_pos = full_text.find('.');
     if (dot_pos == std::string::npos) {
-        DrawMonoText(renderer, x, y, full_text, color, FontSize::HUGE, align, scale, "score", -1, useOutline, outlineColor);
+        DrawMonoText(renderer, x, y, full_text, color, integerSize, align, scale, "score", -1, useOutline, outlineColor, boldInteger ? boldWeight : 0, outlineThickness);
         return;
     }
 
     std::string int_part = full_text.substr(0, dot_pos);
     std::string dec_part = full_text.substr(dot_pos);
 
-    int digitW = GetTextWidth("0", FontSize::HUGE, "score");
+    int digitW = GetTextWidth("0", integerSize, "score");
     int scaledDigitW = static_cast<int>(digitW * scale);
     int int_w = static_cast<int>(int_part.length() * scaledDigitW);
     
-    int decDigitW = GetTextWidth("0", FontSize::MEDIUM, "score");
+    int decDigitW = GetTextWidth("0", decimalSize, "score");
     int scaledDecDigitW = static_cast<int>(decDigitW * scale);
     int dec_w = static_cast<int>(dec_part.length() * scaledDecDigitW);
     
@@ -237,23 +286,20 @@ void FontManager::DrawAccuracy(SDL_Renderer* renderer, int x, int y,
     if (align == TextAlign::CENTER) draw_x -= total_w / 2;
     else if (align == TextAlign::RIGHT) draw_x -= total_w;
 
-    int int_h = GetFontHeight(FontSize::HUGE, "score");
-    int dec_h = GetFontHeight(FontSize::MEDIUM, "score");
+    int int_h = GetFontHeight(integerSize, "score");
+    int dec_h = GetFontHeight(decimalSize, "score");
     int offset_y = (int_h - dec_h) - 8; 
     int scaled_offset_y = static_cast<int>(offset_y * scale);
 
     // Draw integer part
     if (boldInteger) {
-        // Draw shifted for simulated bold, but using cached glyphs
-        for (int b = -1; b <= 1; ++b) {
-            DrawMonoText(renderer, draw_x + b, y, int_part, color, FontSize::HUGE, TextAlign::LEFT, scale, "score", digitW, useOutline, outlineColor);
-        }
+        DrawMonoText(renderer, draw_x, y, int_part, color, integerSize, TextAlign::LEFT, scale, "score", digitW, useOutline, outlineColor, boldWeight, outlineThickness);
     } else {
-        DrawMonoText(renderer, draw_x, y, int_part, color, FontSize::HUGE, TextAlign::LEFT, scale, "score", digitW, useOutline, outlineColor);
+        DrawMonoText(renderer, draw_x, y, int_part, color, integerSize, TextAlign::LEFT, scale, "score", digitW, useOutline, outlineColor, 0, outlineThickness);
     }
     
     // Draw decimal part
-    DrawMonoText(renderer, draw_x + int_w, y + scaled_offset_y, dec_part, color, FontSize::MEDIUM, TextAlign::LEFT, scale, "score", decDigitW, useOutline, outlineColor);
+    DrawMonoText(renderer, draw_x + int_w, y + scaled_offset_y, dec_part, color, decimalSize, TextAlign::LEFT, scale, "score", decDigitW, useOutline, outlineColor, 0, outlineThickness);
 }
 
 int FontManager::GetTextWidth(const std::string& text, FontSize size, const std::string& fontName) {
@@ -286,7 +332,7 @@ TTF_Font* FontManager::GetFont(FontSize size, const std::string& name) {
     return nullptr;
 }
 
-SDL_Texture* FontManager::GetGlyphTexture(SDL_Renderer* renderer, char ch, FontSize size, Color color, const std::string& fontName, int outline) {
+SDL_Texture* FontManager::GetGlyphTexture(SDL_Renderer* renderer, const std::string& ch, FontSize size, Color color, const std::string& fontName, int outline) {
     GlyphKey key = { fontName, size, ch, color, outline };
     if (glyph_cache_.count(key)) return glyph_cache_[key];
 
@@ -295,9 +341,8 @@ SDL_Texture* FontManager::GetGlyphTexture(SDL_Renderer* renderer, char ch, FontS
 
     TTF_SetFontOutline(font, outline);
     
-    std::string s(1, ch);
     SDL_Color sdl_col = { color.r, color.g, color.b, color.a };
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, s.c_str(), sdl_col);
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, ch.c_str(), sdl_col);
     
     // Reset outline for other queries
     TTF_SetFontOutline(font, 0);

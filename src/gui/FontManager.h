@@ -16,7 +16,8 @@ enum class FontSize {
     MEDIUM = 24,    // Song artist, menu items
     LARGE = 36,     // Song title in list, score integer part
     HUGE = 54,      // Grade, combo, large score
-    TITLE = 72      // Scene titles
+    TITLE = 72,     // Scene titles
+    GIANT = 120     // Result screen score
 };
 
 enum class TextAlign {
@@ -47,16 +48,18 @@ public:
                          const std::string& fontName = "default", int thickness = 2);
 
     // Monospaced character drawing (fixed cell width)
-    void DrawMonoText(SDL_Renderer* renderer, int x, int y, 
-                      const std::string& text, Color color, 
-                      FontSize size, TextAlign align = TextAlign::LEFT, double scale = 1.0,
-                      const std::string& fontName = "default", int cellWidth = -1,
-                      bool useOutline = false, Color outlineColor = {0,0,0,0});
+    void DrawMonoText(SDL_Renderer* renderer, int x, int y, const std::string& text,
+                      Color color, FontSize size = FontSize::MEDIUM, TextAlign align = TextAlign::LEFT,
+                      double scale = 1.0, const std::string& fontName = "main", int cellWidth = -1,
+                      bool useOutline = false, Color outlineColor = {0, 0, 0, 255}, int weight = 0,
+                      int outlineThickness = 2);
 
     // Advanced drawing for "Large Integer, Small Decimal" accuracy style
     void DrawAccuracy(SDL_Renderer* renderer, int x, int y, 
                       double accuracy, Color color, TextAlign align = TextAlign::CENTER, double scale = 1.0, int precision = 4,
-                      bool useOutline = false, bool boldInteger = false, Color outlineColor = {0,0,0,0});
+                      bool useOutline = false, bool boldInteger = false, Color outlineColor = {0,0,0,0},
+                      FontSize integerSize = FontSize::HUGE, FontSize decimalSize = FontSize::MEDIUM,
+                      int boldWeight = 1, int outlineThickness = 2);
 
     int GetTextWidth(const std::string& text, FontSize size, const std::string& fontName = "default");
     int GetFontHeight(FontSize size, const std::string& fontName = "default");
@@ -74,7 +77,7 @@ private:
     struct GlyphKey {
         std::string fontName;
         FontSize size;
-        char ch;
+        std::string ch;
         Color color;
         int outline;
         
@@ -97,7 +100,7 @@ private:
     bool initialized_ = false;
 
     TTF_Font* GetFont(FontSize size, const std::string& name = "default");
-    SDL_Texture* GetGlyphTexture(SDL_Renderer* renderer, char ch, FontSize size, Color color, const std::string& fontName, int outline);
+    SDL_Texture* GetGlyphTexture(SDL_Renderer* renderer, const std::string& ch, FontSize size, Color color, const std::string& fontName, int outline);
 };
 
 } // namespace sml

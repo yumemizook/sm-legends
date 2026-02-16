@@ -190,8 +190,16 @@ void Conductor::BuildTimeBeatTable(
     // ---- Step 2: Walk through events computing cumulative time ----
 
     // Walk through events computing cumulative time
-    // StepMania convention: MusicTime = BeatTime - Offset
-    // Beat 0 occurs at MusicTime = -Offset.
+    // StepMania convention: Time = BeatTime - Offset
+    // Beat 0 occurs at Time = -Offset.
+    // So if we want Beat 0 to happen at time T, we start current_time at -T.
+    // BUT SM Offset is "Time in seconds at which beat 0 occurs".
+    // If Offset is positive (e.g. 1.0), beat 0 is at 1.0s.
+    // If Offset is negative (e.g. -1.0), beat 0 is at -1.0s?
+    // Wait, the SM Wiki says: "Negative values cause the steps to start AFTER the music has begun."
+    // This implies Negative Offset -> Positive Start Time.
+    // So Beat 0 Time = -Offset.
+    // e.g. Offset -7.530 -> Beat 0 at +7.530.
     double current_time = -offset;
     double current_beat = 0.0;
     double current_bpm  = 120.0; // Default BPM if first event isn't at beat 0

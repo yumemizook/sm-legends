@@ -117,10 +117,9 @@ void AudioEngine::UnloadMusic() {
 void AudioEngine::Play(double offset_seconds) {
     if (!music_) return;
 
-    // The offset is now handled centrally by the Conductor.
-    // We keep the variable for internal tracking but it should be 0.
+    // Set internal tracking
     offset_ = offset_seconds;
-    seek_offset_ = 0.0;
+    seek_offset_ = std::max(0.0, offset_seconds);
     finished_ = false;
 
     if (Mix_PlayMusic(music_, 0) < 0) {
@@ -129,17 +128,22 @@ void AudioEngine::Play(double offset_seconds) {
         return;
     }
 
-    play_start_ticks_ = static_cast<double>(SDL_GetTicks()) / 1000.0;
+    // Actually seek to the requested position
+    if (seek_offset_ > 0.0) {
+        Mix_SetMusicPosition(seek_offset_);
+    }
+
+    play_start_perf_ = SDL_GetPerformanceCounter();
     playing_ = true;
     paused_ = false;
 
-    std::printf("AudioEngine: Playing (raw time from SDL_GetTicks)\n");
+    std::printf("AudioEngine: Playing at %.4fs (raw time from SDL_GetPerformanceCounter)\n", seek_offset_);
 }
 
 void AudioEngine::Pause() {
     if (!playing_ || paused_) return;
     Mix_PauseMusic();
-    pause_ticks_ = static_cast<double>(SDL_GetTicks()) / 1000.0;
+    pause_perf_ = SDL_GetPerformanceCounter();
     paused_ = true;
 }
 
@@ -147,8 +151,10 @@ void AudioEngine::Resume() {
     if (!paused_) return;
     Mix_ResumeMusic();
     // Adjust start ticks by the pause duration
-    double pause_duration = static_cast<double>(SDL_GetTicks()) / 1000.0 - pause_ticks_;
-    play_start_ticks_ += pause_duration;
+    // We move the start time forward by the duration of the pause
+    uint64_t now = SDL_GetPerformanceCounter();
+    uint64_t duration = now - pause_perf_;
+    play_start_perf_ += duration;
     paused_ = false;
 }
 
@@ -171,10 +177,10 @@ void AudioEngine::SeekTo(double seconds) {
     }
 
     // Reset our time tracking to match
-    play_start_ticks_ = static_cast<double>(SDL_GetTicks()) / 1000.0;
+    play_start_perf_ = SDL_GetPerformanceCounter();
     seek_offset_ = seconds;
     if (paused_) {
-        pause_ticks_ = play_start_ticks_;
+        pause_perf_ = play_start_perf_;
     }
 }
 
@@ -185,16 +191,18 @@ void AudioEngine::SeekTo(double seconds) {
 double AudioEngine::GetPlaybackTime() const {
     if (!playing_) return 0.0;
 
-    double now;
+    uint64_t now;
     if (paused_) {
-        now = pause_ticks_;
+        now = pause_perf_;
     } else {
-        now = static_cast<double>(SDL_GetTicks()) / 1000.0;
+        now = SDL_GetPerformanceCounter();
     }
+
+    double elapsed = static_cast<double>(now - play_start_perf_) / static_cast<double>(SDL_GetPerformanceFrequency());
 
     // Elapsed time since Play() was called, plus any seek offset.
     // Simfile offset is NO LONGER applied here to avoid double-handling.
-    return (now - play_start_ticks_) + seek_offset_;
+    return elapsed + seek_offset_;
 }
 
 // ============================================================================

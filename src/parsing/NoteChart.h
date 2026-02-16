@@ -55,11 +55,10 @@ struct NoteRow {
     [[nodiscard]] size_t NumColumns() const { return columns.size(); }
 
     /// Get the number of notes in this row (taps, hold heads, roll heads, lifts).
-    [[nodiscard]] int NumNotes() const {
+    [[nodiscard]]    int NumNotes() const {
         int count = 0;
         for (auto col : columns) {
-            if (col == NoteType::Tap || col == NoteType::HoldHead || 
-                col == NoteType::RollHead || col == NoteType::Lift) {
+            if (IsTap(col)) {
                 count++;
             }
         }
@@ -126,6 +125,7 @@ struct NoteChart {
         if (type == "dance-single")     return 4;
         if (type == "dance-double")     return 8;
         if (type == "dance-couple")     return 8;
+        if (type == "dance-routine")    return 8;
         if (type == "dance-solo")       return 6;
         if (type == "dance-threepanel") return 3;
         if (type == "pump-single")      return 5;
@@ -143,13 +143,11 @@ struct NoteChart {
     }
 
     /// Get the total number of hittable rows (rows containing Taps, HoldHeads, or RollHeads).
-    [[nodiscard]] int GetTotalTaps() const {
+    [[nodiscard]]    int GetTotalTaps() const {
         int count = 0;
         for (const auto& row : note_rows) {
             for (auto col : row.columns) {
-                if (col == NoteType::Tap ||
-                    col == NoteType::HoldHead ||
-                    col == NoteType::RollHead) {
+                if (IsTap(col)) {
                     ++count;
                     break; // Count the row once
                 }

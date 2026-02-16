@@ -85,7 +85,7 @@ RadarValues ChartAnalyzer::CalculateRadar(const NoteChart& chart, const Simfile*
         bool has_hold = false;
         
         for (auto col : row.columns) {
-            if (col == NoteType::Tap || col == NoteType::HoldHead || col == NoteType::RollHead || col == NoteType::Lift) {
+            if (IsTap(col)) {
                 note_times.push_back(t);
                 taps_on_row++;
             }
