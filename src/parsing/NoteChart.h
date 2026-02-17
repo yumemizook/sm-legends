@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// NoteChart.h — Per-chart note data with optional split timing (SSC)
+// NoteChart.h 窶・Per-chart note data with optional split timing (SSC)
 //
 // Each NoteChart represents one difficulty/stepstype within a simfile.
 // In .ssc files, charts can override the global timing with their own
@@ -33,7 +33,7 @@ enum class ChartVariant {
 
 
 // ============================================================================
-// NoteRow — a single row of notes at a specific beat
+// NoteRow 窶・a single row of notes at a specific beat
 // ============================================================================
 
 /// A single row of notes. Each column corresponds to a lane/receptor.
@@ -67,7 +67,7 @@ struct NoteRow {
 };
 
 // ============================================================================
-// NoteChart — one chart (difficulty) within a simfile
+// NoteChart 窶・one chart (difficulty) within a simfile
 // ============================================================================
 
 /// A single chart within a simfile, containing note data and optional
@@ -85,6 +85,7 @@ struct NoteChart {
     RadarValues radar;
     double custom_difficulty = 1.0;      ///< 1.0-30.0 scale (1 decimal)
     ChartVariant variant = ChartVariant::Normal;
+    std::string variant_kanji;          ///< Specific Kanji for Wild charts (e.g. 鬼, 狂, 裏)
 
     // ========================================================================
     // Note data

@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// InputMapper.h — Keyboard-to-lane mapping for different chart types
+// InputMapper.h 窶・Keyboard-to-lane mapping for different chart types
 //
 // Maps SDL keycodes to column indices. Default bindings follow SM conventions.
 // ============================================================================
@@ -16,7 +16,7 @@
 namespace sml {
 
 /// Timing judgement windows (in seconds, one-sided)
-/// Custom grading system — see grade.md for reference
+/// Custom grading system 窶・see grade.md for reference
 namespace JudgeWindows {
     static constexpr double PCRIT       = 0.01667; // 16.67ms P-Critical
     static constexpr double PERFECT     = 0.03333; // 33.33ms Perfect
@@ -68,14 +68,14 @@ namespace JudgeWeightsEX {
 enum class Judgement {
     NONE,
     PEXTRA,         // P-Extraordinary (EX only)
-    PCRIT,          // P-Critical — white flash ("PERFECT!!")
-    PERFECT,        // Perfect — yellow
-    PERFECT_LOW,    // Perfect(Low) — light yellow
+    PCRIT,          // P-Critical 窶・white flash ("PERFECT!!")
+    PERFECT,        // Perfect 窶・yellow
+    PERFECT_LOW,    // Perfect(Low) 窶・light yellow
     GREAT_HIGH,     // Great(High) / Okay(High)
     GREAT,          // Great / Okay
     GREAT_LOW,      // Great(Low) / Okay(Low)
-    GOOD,           // Good — blue (Normal only)
-    MISS            // Miss — red
+    GOOD,           // Good 窶・blue (Normal only)
+    MISS            // Miss 窶・red
 };
 
 /// Get a display name for a judgement (defaulting to Normal mode names)
@@ -162,7 +162,7 @@ struct KeyBinding {
     int column;
 };
 
-/// Input mapper: keyboard keys → lane indices.
+/// Input mapper: keyboard keys 竊・lane indices.
 /// Also tracks per-lane state (pressed, flash) and hit detection.
 class InputMapper {
 public:
@@ -217,6 +217,10 @@ public:
 
     /// Check if a keycode is mapped to a lane.
     [[nodiscard]] bool IsLaneKey(SDL_Keycode key) const;
+
+    /// Virtual column indices for special actions
+    static constexpr int COL_START  = 100;
+    static constexpr int COL_SELECT = 101;
 
 private:
     std::unordered_map<SDL_Keycode, int> key_to_column_;
@@ -333,6 +337,11 @@ inline void InputMapper::ConfigureForPlayer(const std::string& chart_type, int n
             key_to_column_[SDLK_x]      = 1;
             key_to_column_[SDLK_PERIOD] = 2;
             key_to_column_[SDLK_SLASH]  = 3;
+
+            // Default P1 special keys
+            key_to_column_[SDLK_RETURN] = COL_START;
+            key_to_column_[SDLK_KP_ENTER] = COL_START;
+            key_to_column_[SDLK_RSHIFT] = COL_SELECT;
         } else {
             Configure(chart_type, num_columns); // Fallback for non-4-key
         }
@@ -354,6 +363,12 @@ inline void InputMapper::ConfigureForPlayer(const std::string& chart_type, int n
             key_to_column_[SDLK_KP_2]  = 1;
             key_to_column_[SDLK_KP_8]  = 2;
             key_to_column_[SDLK_KP_6]  = 3;
+
+            // Default P2 special keys
+            key_to_column_[SDLK_KP_ENTER] = COL_START;
+            key_to_column_[SDLK_KP_0]     = COL_START;
+            key_to_column_[SDLK_RSHIFT]   = COL_START;
+            key_to_column_[SDLK_RCTRL]    = COL_SELECT;
         } else {
             // For non-4-key, P2 uses numpad 1-9
             for (int i = 0; i < num_columns && i < 9; ++i) {

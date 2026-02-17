@@ -1,5 +1,5 @@
-// ============================================================================
-// gui_main.cpp — Entry point for the SDL2 visual test GUI
+﻿// ============================================================================
+// gui_main.cpp 窶・Entry point for the SDL2 visual test GUI
 //
 // Usage:
 //   sm-legends-gui                            # Scan 'charts' folder (default)

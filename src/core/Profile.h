@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// Profile.h — Player profile data (local / USB)
+// Profile.h 窶・Player profile data (local / USB)
 //
 // Stores player identity, high scores, per-player settings, and rating.
 // Supports loading from / saving to a directory (local or USB drive).

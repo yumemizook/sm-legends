@@ -1,5 +1,5 @@
-// ============================================================================
-// Conductor.cpp — The timing heart: piecewise-linear time/beat/visual mapping
+﻿// ============================================================================
+// Conductor.cpp 窶・The timing heart: piecewise-linear time/beat/visual mapping
 // ============================================================================
 
 #include "timing/Conductor.h"
@@ -46,7 +46,7 @@ void Conductor::Initialize(
 }
 
 // ============================================================================
-// Runtime update — called each frame with DSP audio time
+// Runtime update 窶・called each frame with DSP audio time
 // ============================================================================
 
 void Conductor::Update(double audio_time) {
@@ -113,7 +113,7 @@ double Conductor::BeatToVisualPosition(double beat) const {
 }
 
 // ============================================================================
-// GetYPosForBeat — the renderer's core function
+// GetYPosForBeat 窶・the renderer's core function
 // ============================================================================
 
 double Conductor::GetYPosForBeat(

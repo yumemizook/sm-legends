@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// AudioEngine.h — SDL2_mixer audio engine for music playback
+// AudioEngine.h 窶・SDL2_mixer audio engine for music playback
 //
 // Wraps SDL2_mixer to load and play song audio files (.ogg, .mp3, .wav).
 // Provides a DSP-style time query for syncing with the Conductor.

@@ -1,4 +1,4 @@
-#ifndef SML_GUI_COLOR_H
+﻿#ifndef SML_GUI_COLOR_H
 #define SML_GUI_COLOR_H
 
 #include <cstdint>

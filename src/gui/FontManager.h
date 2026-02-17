@@ -1,4 +1,4 @@
-#ifndef SML_FONT_MANAGER_H
+﻿#ifndef SML_FONT_MANAGER_H
 #define SML_FONT_MANAGER_H
 
 #include <SDL2/SDL.h>

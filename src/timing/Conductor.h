@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// Conductor.h — The timing heart of the VSRG engine
+// Conductor.h 窶・The timing heart of the VSRG engine
 //
 // Pre-computes piecewise-linear lookup tables from timing events and provides
 // O(log n) conversion between audio time, song beat, and visual position.

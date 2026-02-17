@@ -1,27 +1,27 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// GameWindow.h — SDL2 test GUI for the VSRG timing engine
+// GameWindow.h 窶・SDL2 test GUI for the VSRG timing engine
 //
 // Two screens:
-//   SONG_SELECT — Browse and select songs from a directory
-//   GAMEPLAY    — Play/visualize a selected chart with audio and input
+//   SONG_SELECT 窶・Browse and select songs from a directory
+//   GAMEPLAY    窶・Play/visualize a selected chart with audio and input
 //
 // Song Select Controls:
-//   Up / Down    — Navigate songs
-//   Left / Right — Navigate charts within a song
-//   Enter        — Play selected chart
-//   Escape       — Quit
+//   Up / Down    窶・Navigate songs
+//   Left / Right 窶・Navigate charts within a song
+//   Enter        窶・Play selected chart
+//   Escape       窶・Quit
 //
 // Gameplay Controls:
-//   Lane keys    — Play notes (DFJK for 4-key, arrows also work)
-//   Space        — Play / Pause (when no lane key conflicts)
-//   R            — Reset to beginning
-//   F2           — Adjust scroll speed up
-//   F3           — Adjust scroll speed down
-//   Tab          — Toggle X-Mod / C-Mod
-//   F4           — Toggle downscroll
-//   F1           — Toggle debug overlay
-//   Escape       — Back to song select
+//   Lane keys    窶・Play notes (DFJK for 4-key, arrows also work)
+//   Space        窶・Play / Pause (when no lane key conflicts)
+//   R            窶・Reset to beginning
+//   F2           窶・Adjust scroll speed up
+//   F3           窶・Adjust scroll speed down
+//   Tab          窶・Toggle X-Mod / C-Mod
+//   F4           窶・Toggle downscroll
+//   F1           窶・Toggle debug overlay
+//   Escape       窶・Back to song select
 // ============================================================================
 
 #if HAS_SDL2
@@ -164,6 +164,13 @@ struct PlayerState {
     // Fail sequence
     bool   failed_sequence      = false;
     double fail_animation_timer = 0.0;
+    
+    // Independent chart state
+    const NoteChart* current_chart = nullptr;
+    NoteChart runtime_chart;
+    double chart_end_time = 0.0;
+    bool chart_finished = false;
+    double results_delay = 1.5;
 
     // Visual polish
     double combo_pop_timer       = 0.0;
@@ -195,6 +202,9 @@ struct PlayerState {
         combo_pop_timer = 0.0;
         next_hittable_note = 0;
         total_hittable_notes = 0;
+        current_chart = nullptr;
+        chart_finished = false;
+        results_delay = 1.5;
         note_hit_masks.clear();
         row_best_error.clear();
         hit_flashes.clear();
@@ -274,7 +284,7 @@ private:
     void RenderSongSelect();
     void OnEnterSongSelect();
     void RenderSongList();
-    void RenderChartPanel();
+    void RenderChartPanel(int p);
     void RenderSongSelectHUD();
 
     // --- Rendering: Gameplay ---
@@ -287,9 +297,8 @@ private:
     void RenderMeasureLines();
     void RenderMasks();
     void RenderHUD();
-    void RenderTopBar();
-    void RenderBottomBar();
-    void RenderLifeBar();
+    void RenderPlayerTopHUD(int p);
+    void RenderPlayerLifeBar(int p);
     void RenderProgressBar();
     void RenderBeatFlash();
     void RenderJudgement();
@@ -301,7 +310,7 @@ private:
 
     // --- Rendering: Results ---
     void RenderResults();
-    void RenderResultsPanel(int x, int y, int w, int h, const std::vector<HitRecord>& hits);
+    void RenderResultsPanel(int x, int y, int w, int h, const PlayerState& ps);
     void RenderOffsetGraph(int x, int y, int w, int h, const std::vector<HitRecord>& hits);
 
     // --- Transitions ---
@@ -313,6 +322,7 @@ private:
     void ShowResults();
     void JoinPlayer(int player_idx);
     void UnjoinPlayer(int player_idx);
+    void ApplyInputBindings();
     void SetupPlayerFieldLayout();
 
     // --- Audio helpers ---
@@ -407,7 +417,7 @@ private:
 
     // Song select state
     int  selected_song_  = 0;
-    int  selected_chart_ = 0;
+    int  selected_chart_[MAX_PLAYERS] = {0, 0};
     int  scroll_offset_  = 0;
     int  visible_songs_  = 12;
     double last_up_press_time_   = 0.0;
@@ -430,10 +440,11 @@ private:
 
     int    options_lane_cursor_   = 0;
     int    options_slot_cursor_   = 0;
+    int    options_player_cursor_ = 0; // 0=P1, 1=P2
     int    calibration_cursor_    = 0;
     double audio_offset_          = 0.0; // Global audio offset in seconds
     bool   is_rebinding_          = false;
-    BindInfo custom_binds_4k_[4][3] = {};
+    BindInfo custom_binds_[2][10][3] = {}; // [Player][Action][Slot]
     
     // Calibration Sampling
     bool   is_calibrating_        = false;
@@ -497,13 +508,14 @@ private:
     }
 
     /// Check if all hittable notes in a row have been hit
-    bool IsRowFullyHit(size_t row_idx) const {
+    bool IsRowFullyHit(size_t row_idx, int p) const {
+        if (p < 0 || p >= MAX_PLAYERS) return false;
         uint32_t required = GetRowRequiredMask(row_idx);
         if (required == 0) return false;
-        return (note_hit_masks_[row_idx] & required) == required;
+        return (players_[p].note_hit_masks[row_idx] & required) == required;
     }
 
-    // Combo/score — LEGACY: These are kept for backward compat during refactoring.
+    // Combo/score 窶・LEGACY: These are kept for backward compat during refactoring.
     // New code should use players_[i].combo, players_[i].normal_score, etc.
     int    combo_      = 0;
     int    max_combo_  = 0;

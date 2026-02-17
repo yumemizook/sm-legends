@@ -1,5 +1,5 @@
-// ============================================================================
-// main.cpp — Demo / integration test for the SM-Legends timing engine
+﻿// ============================================================================
+// main.cpp 窶・Demo / integration test for the SM-Legends timing engine
 //
 // Demonstrates the full pipeline: parse a simfile, initialize the conductor,
 // and simulate a playback loop printing timing data.

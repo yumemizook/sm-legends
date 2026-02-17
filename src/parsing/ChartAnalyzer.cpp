@@ -1,4 +1,4 @@
-#include "parsing/ChartAnalyzer.h"
+﻿#include "parsing/ChartAnalyzer.h"
 #include "timing/Conductor.h"
 #include <algorithm>
 #include <cmath>
@@ -15,8 +15,7 @@ static bool IsKanji(char32_t c) {
     return (c >= 0x4E00 && c <= 0x9FFF);
 }
 
-static bool ContainsKanji(const std::string& str) {
-    // Basic UTF-8 parsing to find CJK characters
+static std::string ExtractFirstKanji(const std::string& str) {
     size_t i = 0;
     while (i < str.length()) {
         unsigned char c = static_cast<unsigned char>(str[i]);
@@ -30,7 +29,7 @@ static bool ContainsKanji(const std::string& str) {
             uint32_t cp = ((c & 0x0F) << 12) | 
                           ((str[i+1] & 0x3F) << 6) | 
                           (str[i+2] & 0x3F);
-            if (IsKanji(cp)) return true;
+            if (IsKanji(cp)) return str.substr(i, 3);
             i += 3;
         } else if ((c & 0xF8) == 0xF0) { // 4 bytes
             if (i + 3 >= str.length()) break;
@@ -39,7 +38,11 @@ static bool ContainsKanji(const std::string& str) {
             i++; // Invalid or other
         }
     }
-    return false;
+    return "";
+}
+
+static bool ContainsKanji(const std::string& str) {
+    return !ExtractFirstKanji(str).empty();
 }
 
 RadarValues ChartAnalyzer::CalculateRadar(const NoteChart& chart, const Simfile* simfile) {
@@ -206,7 +209,7 @@ double ChartAnalyzer::CalculateCustomDifficulty(const NoteChart& chart, const Ra
     return r;
 }
 
-ChartVariant ChartAnalyzer::DetectChartVariant(const NoteChart& chart) {
+ChartVariant ChartAnalyzer::DetectChartVariant(NoteChart& chart) {
     std::string desc = chart.description;
     std::transform(desc.begin(), desc.end(), desc.begin(), ::tolower);
     std::string diff = chart.difficulty_name;
@@ -215,8 +218,11 @@ ChartVariant ChartAnalyzer::DetectChartVariant(const NoteChart& chart) {
     // Don't lower credit initially to preserve Kanji
 
     // 1. Wild
-    if (ContainsKanji(chart.credit) || ContainsKanji(chart.description) || 
-        desc.find("wild") != std::string::npos || diff.find("wild") != std::string::npos) {
+    std::string kanji = ExtractFirstKanji(chart.description);
+    if (kanji.empty()) kanji = ExtractFirstKanji(chart.credit);
+
+    if (!kanji.empty() || desc.find("wild") != std::string::npos || diff.find("wild") != std::string::npos) {
+        chart.variant_kanji = kanji;
         return ChartVariant::Wild;
     }
 

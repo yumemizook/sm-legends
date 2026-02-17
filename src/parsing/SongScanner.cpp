@@ -1,5 +1,5 @@
-// ============================================================================
-// SongScanner.cpp — Recursive simfile scanner implementation
+﻿// ============================================================================
+// SongScanner.cpp 窶・Recursive simfile scanner implementation
 // ============================================================================
 
 #include "SongScanner.h"
@@ -60,6 +60,7 @@ int SongScanner::ScanDirectory(const std::string& root_path) {
             info.credit = chart.credit;
             info.radar = chart.radar;
             info.variant = chart.variant;
+            info.variant_kanji = chart.variant_kanji;
             info.num_notes = chart.GetTotalTaps();
             entry.charts.push_back(std::move(info));
         }

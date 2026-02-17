@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// SimfileParser.h — Parser for StepMania .sm and .ssc simfile formats
+// SimfileParser.h 窶・Parser for StepMania .sm and .ssc simfile formats
 //
 // Handles both legacy .sm (global timing only) and modern .ssc (per-chart
 // split timing) formats. Produces a fully populated Simfile structure.

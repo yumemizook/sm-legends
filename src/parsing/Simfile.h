@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// Simfile.h — Top-level song/simfile data container
+// Simfile.h 窶・Top-level song/simfile data container
 //
 // Represents a fully parsed .sm or .ssc file. Contains song metadata,
 // global timing data, and a collection of NoteCharts (one per difficulty).

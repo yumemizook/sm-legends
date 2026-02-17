@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// SongScanner.h — Recursive directory scanner for .sm / .ssc simfiles
+// SongScanner.h 窶・Recursive directory scanner for .sm / .ssc simfiles
 //
 // Scans a directory tree and lazily parses simfile headers (metadata only)
 // to build a song list for the song select screen.
@@ -33,6 +33,7 @@ struct SongEntry {
         std::string credit;
         RadarValues radar;
         ChartVariant variant = ChartVariant::Normal;
+        std::string variant_kanji;
         int         num_notes = 0;
     };
     std::vector<ChartInfo> charts;

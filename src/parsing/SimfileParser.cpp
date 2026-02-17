@@ -1,5 +1,5 @@
-// ============================================================================
-// SimfileParser.cpp — Full .sm and .ssc parser implementation
+﻿// ============================================================================
+// SimfileParser.cpp 窶・Full .sm and .ssc parser implementation
 // ============================================================================
 
 #include "parsing/SimfileParser.h"

@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// TimingData.h — Core timing data structures for the VSRG engine
+// TimingData.h 窶・Core timing data structures for the VSRG engine
 //
 // These structs form the backbone of the timing system. Raw parsed segments
 // are stored as TimingSegment; pre-computed lookup tables use TimeBeatSegment
@@ -26,8 +26,8 @@ enum class TimingSegmentType {
 
 /// Scroll modifier type used during rendering.
 enum class ScrollModType {
-    XMod,   ///< Multiplier — speed scales with BPM and scroll segments
-    CMod,   ///< Constant  — fixed pixels-per-second regardless of BPM
+    XMod,   ///< Multiplier 窶・speed scales with BPM and scroll segments
+    CMod,   ///< Constant  窶・fixed pixels-per-second regardless of BPM
 };
 
 // ============================================================================

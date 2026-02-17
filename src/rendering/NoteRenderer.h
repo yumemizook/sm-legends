@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
-// NoteRenderer.h — Note Y-position calculation for VSRG rendering
+// NoteRenderer.h 窶・Note Y-position calculation for VSRG rendering
 //
 // Translates beat positions to screen coordinates using the Conductor's
 // timing data. Supports X-Mod (BPM-relative) and C-Mod (constant speed).
@@ -23,7 +23,7 @@ struct NoteFieldConfig {
 
 /// Handles calculation of note screen positions.
 ///
-/// This is intentionally a stateless utility class — all state lives in the
+/// This is intentionally a stateless utility class 窶・all state lives in the
 /// Conductor. The renderer simply queries the Conductor each frame to compute
 /// note Y-coordinates.
 class NoteRenderer {

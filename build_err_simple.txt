@@ -1,0 +1,24 @@
+﻿MSBuild version 17.14.40+3e7442088 for .NET Framework
+
+  ChartAnalyzer.cpp
+  SimfileParser.cpp
+  NoteRenderer.cpp
+  Conductor.cpp
+  Generating Code...
+  sm_engine.vcxproj -> D:\project stuff\sm-legends\build\Debug\sm_engine.lib
+  GameWindow.cpp
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(992,9): error C2065: 'custom_binds_4k_': undeclared identifier [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(3333,77): error C2001: newline in constant [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(3334,28): error C2146: syntax error: missing ')' before identifier 'selected' [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(3333,19): error C2660: 'sml::FontManager::DrawText': function does not take 4 arguments [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+      D:\project stuff\sm-legends\src\gui\FontManager.h(39,10):
+      see declaration of 'sml::FontManager::DrawText'
+      D:\project stuff\sm-legends\src\gui\GameWindow.cpp(3333,19):
+      while trying to match the argument list '(SDL_Renderer *, int, int, const char [9])'
+  
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(3334,28): error C2146: syntax error: missing ';' before identifier 'selected' [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+D:\project stuff\sm-legends\src\gui\GameWindow.cpp(3335,61): error C2059: syntax error: ')' [D:\project stuff\sm-legends\build\sm_gui.vcxproj]
+  FontManager.cpp
+  SongScanner.cpp
+  AudioEngine.cpp
+  Generating Code...

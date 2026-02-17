@@ -1,5 +1,5 @@
-// ============================================================================
-// NoteRenderer.cpp — Note position calculation
+﻿// ============================================================================
+// NoteRenderer.cpp 窶・Note position calculation
 // ============================================================================
 
 #include "rendering/NoteRenderer.h"
@@ -50,7 +50,7 @@ std::pair<size_t, size_t> NoteRenderer::GetVisibleNoteRange(
     double current_beat = conductor.GetCurrentBeat();
 
     // Estimate the visible beat range based on scroll speed.
-    // For X-Mod: visible_range ≈ screen_height / (pixels_per_beat * speed_mod)
+    // For X-Mod: visible_range 竕・screen_height / (pixels_per_beat * speed_mod)
     // For C-Mod: we need to estimate based on BPM, but we use a generous range
     double visible_beats;
     if (config.mod_type == ScrollModType::XMod) {

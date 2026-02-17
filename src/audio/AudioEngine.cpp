@@ -1,5 +1,5 @@
-// ============================================================================
-// AudioEngine.cpp — SDL2_mixer audio implementation
+﻿// ============================================================================
+// AudioEngine.cpp 窶・SDL2_mixer audio implementation
 // ============================================================================
 
 #if HAS_SDL2
@@ -47,7 +47,7 @@ bool AudioEngine::Init(int frequency, int channels, int chunk_size) {
     int flags = MIX_INIT_OGG | MIX_INIT_MP3 | MIX_INIT_FLAC;
     int initted = Mix_Init(flags);
     if ((initted & flags) != flags) {
-        // Not fatal — some formats may still work
+        // Not fatal 窶・some formats may still work
         std::printf("AudioEngine: Some audio decoders unavailable: %s\n", Mix_GetError());
     }
 
@@ -185,7 +185,7 @@ void AudioEngine::SeekTo(double seconds) {
 }
 
 // ============================================================================
-// Time query — THE CRITICAL FUNCTION for Conductor sync
+// Time query 窶・THE CRITICAL FUNCTION for Conductor sync
 // ============================================================================
 
 double AudioEngine::GetPlaybackTime() const {
