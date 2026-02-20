@@ -29,7 +29,7 @@ public:
         
         switch (type_) {
             case LifeType::STANDARD:
-                life_val_ = 0.5f;
+                life_val_ = 0.8f;
                 battery_lives_ = 0;
                 break;
             case LifeType::LIFE4:
@@ -80,13 +80,31 @@ public:
         } else if (type_ == LifeType::LIFE4 || type_ == LifeType::RISKY) {
             battery_lives_--;
         } else if (type_ == LifeType::FLARE) {
-            // Mines in Flare usually deduct a lot or instant fail? 
-            // Following DDR Flare rules: Mines are typically NG/Miss equivalent.
             float deduction = GetFlareDeductions().miss;
             life_val_ -= deduction;
         }
         
         if (life_val_ <= 0.0f) { life_val_ = 0.0f; failed_ = true; }
+        if (battery_lives_ <= 0 && (type_ == LifeType::LIFE4 || type_ == LifeType::RISKY)) failed_ = true;
+    }
+
+    void OnHoldResult(int grade) {
+        if (failed_) return;
+        // grade: 0=Good, 1=NG, 2=Bad
+        if (type_ == LifeType::STANDARD) {
+            if (grade == 0) life_val_ += 0.02f;
+            else if (grade == 1) life_val_ -= 0.02f;
+            else if (grade == 2) life_val_ -= 0.08f;
+        } else if (type_ == LifeType::LIFE4 || type_ == LifeType::RISKY) {
+            if (grade == 2) battery_lives_--;
+        } else if (type_ == LifeType::FLARE) {
+            FlareDeduction d = GetFlareDeductions();
+            if (grade == 1) life_val_ -= d.good;
+            else if (grade == 2) life_val_ -= d.miss;
+        }
+
+        life_val_ = std::clamp(life_val_, 0.0f, 1.0f);
+        if (life_val_ <= 0.0f && type_ != LifeType::LIFE4 && type_ != LifeType::RISKY) failed_ = true;
         if (battery_lives_ <= 0 && (type_ == LifeType::LIFE4 || type_ == LifeType::RISKY)) failed_ = true;
     }
 

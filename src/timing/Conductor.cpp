@@ -20,22 +20,25 @@ void Conductor::Initialize(const Simfile& simfile, const NoteChart& chart) {
     const auto& bpms    = simfile.GetEffectiveBPMs(chart);
     const auto& stops   = simfile.GetEffectiveStops(chart);
     const auto& scrolls = simfile.GetEffectiveScrolls(chart);
+    const auto& speeds  = simfile.GetEffectiveSpeeds(chart);
     double offset       = simfile.GetEffectiveOffset(chart);
 
-    Initialize(bpms, stops, scrolls, offset);
+    Initialize(bpms, stops, scrolls, speeds, offset);
 }
 
 void Conductor::Initialize(
     const std::vector<TimingSegment>& bpms,
     const std::vector<TimingSegment>& stops,
     const std::vector<TimingSegment>& scrolls,
+    const std::vector<TimingSegment>& speeds,
     double offset
 ) {
     time_beat_table_.clear();
     visual_table_.clear();
+    speed_segments_ = speeds;
 
     BuildTimeBeatTable(bpms, stops, offset);
-    BuildVisualTable(scrolls);
+    BuildVisualTable(scrolls, speeds);
 
     current_time_       = 0.0;
     current_beat_       = 0.0;
@@ -43,6 +46,31 @@ void Conductor::Initialize(
     current_bpm_        = 0.0;
     in_stop_            = false;
     initialized_        = true;
+}
+
+void Conductor::PopulateChartTiming(NoteChart& chart) const {
+    if (!initialized_) return;
+    int num_rows = static_cast<int>(chart.note_rows.size());
+    for (int i = 0; i < num_rows; ++i) {
+        auto& row = chart.note_rows[i];
+        row.time = BeatToTime(row.beat);
+        row.visual_pos = BeatToVisualPosition(row.beat);
+        
+        row.tail_row_indices.assign(row.columns.size(), -1);
+        for (int col = 0; col < static_cast<int>(row.columns.size()); ++col) {
+            NoteType nt = row.columns[col];
+            if (nt == NoteType::HoldHead || nt == NoteType::RollHead) {
+                // Find tail
+                for (int j = i + 1; j < num_rows; ++j) {
+                    if (col < static_cast<int>(chart.note_rows[j].columns.size()) &&
+                        chart.note_rows[j].columns[col] == NoteType::HoldTail) {
+                        row.tail_row_indices[col] = j;
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -149,6 +177,25 @@ double Conductor::GetYPosForBeat(
     }
 
     return receptor_y; // Unreachable
+}
+
+double Conductor::GetYPosForVisualPos(
+    double target_vpos,
+    double speed_mod,
+    double receptor_y,
+    double pixels_per_beat
+) const {
+    double delta = target_vpos - current_visual_pos_;
+    return receptor_y - delta * pixels_per_beat * speed_mod;
+}
+
+double Conductor::GetYPosForTime(
+    double target_time,
+    double speed_mod,
+    double receptor_y
+) const {
+    double delta_time = target_time - current_time_;
+    return receptor_y - delta_time * speed_mod;
 }
 
 // ============================================================================
@@ -265,9 +312,36 @@ void Conductor::BuildTimeBeatTable(
 // Lookup table construction: Visual Position
 // ============================================================================
 
-void Conductor::BuildVisualTable(const std::vector<TimingSegment>& scrolls) {
-    // If no scroll segments, the visual position is simply 1:1 with beat
-    if (scrolls.empty()) {
+void Conductor::BuildVisualTable(
+    const std::vector<TimingSegment>& scrolls,
+    const std::vector<TimingSegment>& speeds
+) {
+    // Merge scroll and speed change points into a unified visual table.
+    // Effective visual rate = scroll_rate * speed_ratio
+    // SCROLLS are beat-based multipliers, SPEEDS are beat-based with transitions.
+    // For simplicity, we treat SPEEDS as instant changes (ignoring transition for now).
+
+    // Collect all change-point beats
+    struct ChangePoint {
+        double beat;
+        enum Type { SCROLL, SPEED } type;
+        double value;
+    };
+    std::vector<ChangePoint> changes;
+
+    for (const auto& s : scrolls) {
+        changes.push_back({s.start_beat, ChangePoint::SCROLL, s.value});
+    }
+    for (const auto& s : speeds) {
+        changes.push_back({s.start_beat, ChangePoint::SPEED, s.value});
+    }
+
+    // Sort by beat
+    std::sort(changes.begin(), changes.end(),
+        [](const ChangePoint& a, const ChangePoint& b) { return a.beat < b.beat; });
+
+    if (changes.empty()) {
+        // No scroll or speed segments: 1:1 mapping
         VisualSegment seg;
         seg.start_beat       = 0.0;
         seg.start_visual_pos = 0.0;
@@ -278,37 +352,40 @@ void Conductor::BuildVisualTable(const std::vector<TimingSegment>& scrolls) {
 
     double current_beat = 0.0;
     double current_pos  = 0.0;
-    double current_rate = 1.0;
+    double current_scroll = 1.0;
+    double current_speed  = 1.0;
 
-    // Handle scroll changes that start after beat 0
-    if (scrolls.front().start_beat > 0.0) {
-        // Default scroll rate of 1.0 from beat 0 to first scroll change
+    // Handle changes that start after beat 0
+    if (changes.front().beat > 0.0) {
         VisualSegment seg;
         seg.start_beat       = 0.0;
         seg.start_visual_pos = 0.0;
-        seg.scroll_rate      = 1.0;
+        seg.scroll_rate      = current_scroll * current_speed;
         visual_table_.push_back(seg);
 
-        current_pos  = scrolls.front().start_beat * 1.0;
-        current_beat = scrolls.front().start_beat;
+        current_pos  = changes.front().beat * current_scroll * current_speed;
+        current_beat = changes.front().beat;
     }
 
-    for (const auto& scroll : scrolls) {
-        if (scroll.start_beat > current_beat) {
-            // Accumulate visual position from the gap
-            current_pos += (scroll.start_beat - current_beat) * current_rate;
-            current_beat = scroll.start_beat;
+    for (const auto& cp : changes) {
+        if (cp.beat > current_beat) {
+            current_pos += (cp.beat - current_beat) * current_scroll * current_speed;
+            current_beat = cp.beat;
         }
 
-        // Start new visual segment at this scroll change
+        if (cp.type == ChangePoint::SCROLL) {
+            current_scroll = cp.value;
+        } else {
+            current_speed = cp.value;
+        }
+
         VisualSegment seg;
-        seg.start_beat       = scroll.start_beat;
+        seg.start_beat       = cp.beat;
         seg.start_visual_pos = current_pos;
-        seg.scroll_rate      = scroll.value;
+        seg.scroll_rate      = current_scroll * current_speed;
         visual_table_.push_back(seg);
 
-        current_rate = scroll.value;
-        current_beat = scroll.start_beat;
+        current_beat = cp.beat;
     }
 }
 

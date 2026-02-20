@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <limits>
+#include <string>
 
 namespace sml {
 
@@ -113,6 +114,32 @@ struct VisualSegment {
     }
 };
 
+/// A single fake segment parsed from #FAKES (SSC).
+/// Notes falling within [start_beat, start_beat + length_beats) are treated
+/// as cosmetic-only (not judged, not scored).
+struct FakeSegment {
+    double start_beat   = 0.0;  ///< Beat at which the fake region starts
+    double length_beats = 0.0;  ///< Duration of the fake region in beats
+
+    /// Check if a given beat falls within this fake region.
+    [[nodiscard]] bool ContainsBeat(double beat) const {
+        return beat >= start_beat && beat < start_beat + length_beats;
+    }
+};
+
+/// A single attack parsed from #ATTACKS.
+/// Format in simfile: TIME=<seconds>:LEN=<seconds>:MODS=<modifier string>
+struct Attack {
+    double start_time  = 0.0;   ///< Time in seconds when the attack starts
+    double length      = 0.0;   ///< Duration in seconds
+    std::string mods;            ///< Modifier string (e.g. "1.5x,reverse,drunk")
+
+    /// Check if this attack is active at a given time.
+    [[nodiscard]] bool IsActive(double time) const {
+        return time >= start_time && time < start_time + length;
+    }
+};
+
 // ============================================================================
 // Note types
 // ============================================================================
@@ -133,10 +160,14 @@ enum class NoteType : uint8_t {
     TapP2     = 0x82    ///< Force P2 coloring (Blue)
 };
 
-/// Helper to check if a NoteType is any form of Tap (Hittable note)
 inline bool IsTap(NoteType t) {
     return t == NoteType::Tap || t == NoteType::TapP1 || t == NoteType::TapP2 ||
            t == NoteType::HoldHead || t == NoteType::RollHead || t == NoteType::Lift;
+}
+
+/// Helper to check if a NoteType is any form of visible / interactive note
+inline bool IsVisibleNote(NoteType t) {
+    return IsTap(t) || t == NoteType::Mine || t == NoteType::Fake;
 }
 
 } // namespace sml

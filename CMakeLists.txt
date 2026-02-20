@@ -8,26 +8,57 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-# =============================================================================
-# Dependencies
-# =============================================================================
-find_package(SDL2 QUIET)
-find_package(SDL2_mixer QUIET)
-find_package(SDL2_ttf QUIET)
+# Manual dependency setup - Bypass vcpkg manifest mode to avoid hangs
+set(VCPKG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/installed/x64-windows")
+message(STATUS "Using local dependencies from: ${VCPKG_ROOT}")
 
-# If SDL2 is not found via find_package, try pkg-config as a fallback
-if(NOT SDL2_FOUND)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(SDL2 IMPORTED_TARGET sdl2)
-        if(NOT SDL2_mixer_FOUND)
-            pkg_check_modules(SDL2_mixer IMPORTED_TARGET SDL2_mixer)
-        endif()
-        if(NOT SDL2_ttf_FOUND)
-            pkg_check_modules(SDL2_ttf IMPORTED_TARGET SDL2_ttf)
-        endif()
+# FFmpeg
+set(FFMPEG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg")
+foreach(lib avcodec avformat avutil swscale)
+    if(NOT TARGET FFmpeg::${lib})
+        add_library(FFmpeg::${lib} UNKNOWN IMPORTED)
+        set_target_properties(FFmpeg::${lib} PROPERTIES
+            IMPORTED_LOCATION "${FFMPEG_ROOT}/lib/${lib}.lib"
+            INTERFACE_INCLUDE_DIRECTORIES "${FFMPEG_ROOT}/include")
     endif()
+endforeach()
+
+# SDL2
+if(NOT TARGET SDL2::SDL2)
+    add_library(SDL2::SDL2 UNKNOWN IMPORTED)
+    set_target_properties(SDL2::SDL2 PROPERTIES
+        IMPORTED_LOCATION "${VCPKG_ROOT}/lib/SDL2.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${VCPKG_ROOT}/include;${VCPKG_ROOT}/include/SDL2")
 endif()
+
+# SDL2_mixer
+if(NOT TARGET SDL2_mixer::SDL2_mixer)
+    add_library(SDL2_mixer::SDL2_mixer UNKNOWN IMPORTED)
+    set_target_properties(SDL2_mixer::SDL2_mixer PROPERTIES
+        IMPORTED_LOCATION "${VCPKG_ROOT}/lib/SDL2_mixer.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${VCPKG_ROOT}/include;${VCPKG_ROOT}/include/SDL2")
+endif()
+
+# SDL2_ttf
+if(NOT TARGET SDL2_ttf::SDL2_ttf)
+    add_library(SDL2_ttf::SDL2_ttf UNKNOWN IMPORTED)
+    set_target_properties(SDL2_ttf::SDL2_ttf PROPERTIES
+        IMPORTED_LOCATION "${VCPKG_ROOT}/lib/SDL2_ttf.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${VCPKG_ROOT}/include;${VCPKG_ROOT}/include/SDL2")
+endif()
+
+# SDL2main (Required for WIN32 executable)
+if(NOT TARGET SDL2::SDL2main)
+    add_library(SDL2::SDL2main UNKNOWN IMPORTED)
+    set_target_properties(SDL2::SDL2main PROPERTIES
+        IMPORTED_LOCATION "${VCPKG_ROOT}/lib/manual-link/SDL2main.lib")
+endif()
+
+# Explicitly add include directories globally for reliability
+include_directories("${VCPKG_ROOT}/include")
+include_directories("${VCPKG_ROOT}/include/SDL2")
+include_directories("${FFMPEG_ROOT}/include")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 # =============================================================================
 # Source files
@@ -54,6 +85,7 @@ set(GUI_SOURCES
     src/gui/FontManager.cpp
     src/parsing/SongScanner.cpp
     src/audio/AudioEngine.cpp
+    src/video/VideoDecoder.cpp
 )
 
 set(GUI_HEADERS
@@ -62,6 +94,7 @@ set(GUI_HEADERS
     src/parsing/SongScanner.h
     src/audio/AudioEngine.h
     src/input/InputMapper.h
+    src/video/VideoDecoder.h
 )
 
 # =============================================================================
@@ -70,36 +103,12 @@ set(GUI_HEADERS
 add_library(sm_engine STATIC ${ENGINE_SOURCES} ${ENGINE_HEADERS})
 target_include_directories(sm_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-if(SDL2_FOUND)
-    target_link_libraries(sm_engine PUBLIC SDL2::SDL2)
-    target_compile_definitions(sm_engine PUBLIC HAS_SDL2=1)
-    message(STATUS "SDL2 found - building with GUI support")
-
-    # SDL2_mixer
-    if(TARGET SDL2_mixer::SDL2_mixer)
-        target_link_libraries(sm_engine PUBLIC SDL2_mixer::SDL2_mixer)
-        message(STATUS "SDL2_mixer found - building with audio support")
-    elseif(TARGET SDL2_mixer::SDL2_mixer-static)
-        target_link_libraries(sm_engine PUBLIC SDL2_mixer::SDL2_mixer-static)
-        message(STATUS "SDL2_mixer found (static) - building with audio support")
-    else()
-        message(STATUS "SDL2_mixer not found - building without audio")
-    endif()
-
-    # SDL2_ttf
-    if(TARGET SDL2_ttf::SDL2_ttf)
-        target_link_libraries(sm_engine PUBLIC SDL2_ttf::SDL2_ttf)
-        message(STATUS "SDL2_ttf found - building with TTF support")
-    elseif(TARGET SDL2_ttf::SDL2_ttf-static)
-        target_link_libraries(sm_engine PUBLIC SDL2_ttf::SDL2_ttf-static)
-        message(STATUS "SDL2_ttf found (static) - building with TTF support")
-    else()
-        message(STATUS "SDL2_ttf not found - building without TTF")
-    endif()
-else()
-    message(STATUS "SDL2 not found - building timing engine only (no GUI)")
-    target_compile_definitions(sm_engine PUBLIC HAS_SDL2=0)
-endif()
+target_link_libraries(sm_engine PUBLIC 
+    SDL2::SDL2 
+    SDL2_mixer::SDL2_mixer 
+    SDL2_ttf::SDL2_ttf
+)
+target_compile_definitions(sm_engine PUBLIC HAS_SDL2=1)
 
 # =============================================================================
 # Console demo executable (no SDL2 required)
@@ -110,23 +119,40 @@ target_link_libraries(sm-legends PRIVATE sm_engine)
 # =============================================================================
 # GUI test executable (requires SDL2)
 # =============================================================================
-if(SDL2_FOUND)
-    add_library(sm_gui STATIC ${GUI_SOURCES} ${GUI_HEADERS})
-    target_link_libraries(sm_gui PUBLIC sm_engine)
+add_library(sm_gui STATIC ${GUI_SOURCES} ${GUI_HEADERS})
+target_link_libraries(sm_gui PUBLIC sm_engine)
 
-    add_executable(sm-legends-gui src/gui_main.cpp)
-    target_link_libraries(sm-legends-gui PRIVATE sm_gui)
+# Link FFmpeg libraries (avcodec, avformat, avutil, swscale)
+# Note: FindFFmpeg.cmake or vcpkg usually provides these variables or imported targets.
+# vcpkg usually provides FFmpeg::avcodec, etc.
+if(TARGET FFmpeg::avcodec)
+    target_link_libraries(sm_gui PRIVATE 
+        FFmpeg::avcodec 
+        FFmpeg::avformat 
+        FFmpeg::avutil 
+        FFmpeg::swscale
+    )
+else()
+    # Fallback to variables if imported targets aren't defined
+    target_link_libraries(sm_gui PRIVATE 
+        ${FFMPEG_LIBRARIES}
+    )
+    target_include_directories(sm_gui PRIVATE ${FFMPEG_INCLUDE_DIRS})
+endif()
 
-    # On Windows, use WinMain entry point for release but console for debug
-    if(WIN32)
-        # Keep console window for debug output
-        set_target_properties(sm-legends-gui PROPERTIES
-            WIN32_EXECUTABLE $<CONFIG:Release>
-        )
-        # Link SDL2main for WinMain wrapper
-        if(TARGET SDL2::SDL2main)
-            target_link_libraries(sm-legends-gui PRIVATE SDL2::SDL2main)
-        endif()
+add_executable(sm-legends-gui src/gui_main.cpp)
+target_link_libraries(sm-legends-gui PRIVATE sm_gui)
+target_link_options(sm-legends-gui PRIVATE $<$<CONFIG:Debug>:/NODEFAULTLIB:msvcrt.lib>)
+
+# On Windows, use WinMain entry point for release but console for debug
+if(WIN32)
+    # Keep console window for debug output
+    set_target_properties(sm-legends-gui PROPERTIES
+        WIN32_EXECUTABLE $<CONFIG:Release>
+    )
+    # Link SDL2main for WinMain wrapper
+    if(TARGET SDL2::SDL2main)
+        target_link_libraries(sm-legends-gui PRIVATE SDL2::SDL2main)
     endif()
 endif()
 

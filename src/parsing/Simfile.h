@@ -13,6 +13,18 @@
 
 namespace sml {
 
+/// A single background change event (#BGCHANGES)
+struct BGEvent {
+    double beat = 0.0;
+    std::string file;
+    double rate = 1.0;
+    int transition = 0; // 0=Crossfade, etc.
+
+    bool operator<(const BGEvent& other) const {
+        return beat < other.beat;
+    }
+};
+
 /// A fully parsed simfile (.sm or .ssc) with all its charts.
 struct Simfile {
     // ========================================================================
@@ -57,6 +69,15 @@ struct Simfile {
 
     /// Global speed segments (SSC #SPEEDS).
     std::vector<TimingSegment> speeds;
+
+    /// Global fake segments (SSC #FAKES).
+    std::vector<FakeSegment> fakes;
+
+    /// Global attacks (SSC #ATTACKS).
+    std::vector<Attack> attacks;
+
+    /// Background animation changes (#BGCHANGES).
+    std::vector<BGEvent> bg_changes;
 
     // ========================================================================
     // Charts
@@ -106,6 +127,30 @@ struct Simfile {
     ) const {
         return chart.HasOwnTimingData() && !chart.scrolls.empty()
             ? chart.scrolls : scrolls;
+    }
+
+    /// Get the effective speeds for a given chart.
+    [[nodiscard]] const std::vector<TimingSegment>& GetEffectiveSpeeds(
+        const NoteChart& chart
+    ) const {
+        return chart.HasOwnTimingData() && !chart.speeds.empty()
+            ? chart.speeds : speeds;
+    }
+
+    /// Get the effective fakes for a given chart.
+    [[nodiscard]] const std::vector<FakeSegment>& GetEffectiveFakes(
+        const NoteChart& chart
+    ) const {
+        return chart.HasOwnTimingData() && !chart.fakes.empty()
+            ? chart.fakes : fakes;
+    }
+
+    /// Get the effective attacks for a given chart.
+    [[nodiscard]] const std::vector<Attack>& GetEffectiveAttacks(
+        const NoteChart& chart
+    ) const {
+        return chart.HasOwnTimingData() && !chart.attacks.empty()
+            ? chart.attacks : attacks;
     }
 
     /// Get the effective offset for a given chart.

@@ -43,8 +43,13 @@ public:
         const std::vector<TimingSegment>& bpms,
         const std::vector<TimingSegment>& stops,
         const std::vector<TimingSegment>& scrolls,
+        const std::vector<TimingSegment>& speeds,
         double offset
     );
+
+    /// Pre-calculate time and visual_pos for every NoteRow in the chart.
+    /// This should be called once per chart after Conductor is initialized.
+    void PopulateChartTiming(NoteChart& chart) const;
 
     // ========================================================================
     // Runtime update
@@ -83,6 +88,21 @@ public:
         double speed_mod,
         double receptor_y,
         double pixels_per_beat = 64.0
+    ) const;
+
+    /// Faster version of GetYPosForBeat using pre-calculated visual position.
+    [[nodiscard]] double GetYPosForVisualPos(
+        double target_vpos,
+        double speed_mod,
+        double receptor_y,
+        double pixels_per_beat = 64.0
+    ) const;
+
+    /// Faster version of GetYPosForBeat using pre-calculated time (for C-Mod).
+    [[nodiscard]] double GetYPosForTime(
+        double target_time,
+        double speed_mod,
+        double receptor_y
     ) const;
 
     // ========================================================================
@@ -130,8 +150,11 @@ private:
         double offset
     );
 
-    /// Build the beat -> visual position lookup table from scroll segments.
-    void BuildVisualTable(const std::vector<TimingSegment>& scrolls);
+    /// Build the beat -> visual position lookup table from scroll and speed segments.
+    void BuildVisualTable(
+        const std::vector<TimingSegment>& scrolls,
+        const std::vector<TimingSegment>& speeds
+    );
 
     // ========================================================================
     // Binary search helpers
@@ -163,6 +186,9 @@ private:
     double current_bpm_        = 0.0;
     bool   in_stop_            = false;
     bool   initialized_        = false;
+
+    /// Stored speed segments for runtime queries.
+    std::vector<TimingSegment> speed_segments_;
 };
 
 } // namespace sml

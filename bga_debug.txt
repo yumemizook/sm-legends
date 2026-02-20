@@ -1,0 +1,14 @@
+[BGA] Request: Cubibibibism - vid.mp4
+[BGA] Initial target: charts\Cubibibibism\Cubibibibism - vid.mp4
+[BGA] Video detected. Searching for fallback...
+[BGA] Scanning dir: charts\Cubibibibism
+  Candidate: Cubibibibism - bn.jpg (146329)
+[BGA] Selected fallback: charts\Cubibibibism\Cubibibibism - bn.jpg
+[BGA] Loaded successfully.
+[BGA] Request: Cubibibibism - vid.mp4
+[BGA] Initial target: charts\Cubibibibism\Cubibibibism - vid.mp4
+[BGA] Video detected. Searching for fallback...
+[BGA] Scanning dir: charts\Cubibibibism
+  Candidate: Cubibibibism - bn.jpg (146329)
+[BGA] Selected fallback: charts\Cubibibibism\Cubibibibism - bn.jpg
+[BGA] Loaded successfully.

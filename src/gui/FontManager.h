@@ -1,4 +1,4 @@
-﻿#ifndef SML_FONT_MANAGER_H
+#ifndef SML_FONT_MANAGER_H
 #define SML_FONT_MANAGER_H
 
 #include <SDL2/SDL.h>
@@ -24,6 +24,29 @@ enum class TextAlign {
     LEFT,
     CENTER,
     RIGHT
+};
+
+struct FontKey {
+    std::string name;
+    FontSize size;
+    bool operator<(const FontKey& other) const {
+        if (name != other.name) return name < other.name;
+        return size < other.size;
+    }
+};
+
+struct GlyphKey {
+    std::string fontName;
+    FontSize size;
+    std::string ch;
+    int outline;
+    
+    bool operator<(const GlyphKey& other) const {
+        if (fontName != other.fontName) return fontName < other.fontName;
+        if (size != other.size) return size < other.size;
+        if (ch != other.ch) return ch < other.ch;
+        return outline < other.outline;
+    }
 };
 
 class FontManager {
@@ -61,46 +84,25 @@ public:
                       FontSize integerSize = FontSize::HUGE, FontSize decimalSize = FontSize::MEDIUM,
                       int boldWeight = 1, int outlineThickness = 2);
 
+    // Generic styled number (Large integer/sign, Small decimal/percentage)
+    void DrawStyledNumber(SDL_Renderer* renderer, int x, int y, 
+                         const std::string& text, Color color, TextAlign align = TextAlign::CENTER, double scale = 1.0,
+                         bool useOutline = false, Color outlineColor = {0,0,0,0},
+                         FontSize largeSize = FontSize::HUGE, FontSize smallSize = FontSize::MEDIUM,
+                         int outlineThickness = 2);
+
     int GetTextWidth(const std::string& text, FontSize size, const std::string& fontName = "default");
     int GetFontHeight(FontSize size, const std::string& fontName = "default");
 
+    SDL_Texture* GetGlyphTexture(SDL_Renderer* renderer, const std::string& ch, FontSize size, const std::string& fontName, int outline);
+
 private:
-    struct FontKey {
-        std::string name;
-        FontSize size;
-        bool operator<(const FontKey& other) const {
-            if (name != other.name) return name < other.name;
-            return size < other.size;
-        }
-    };
-
-    struct GlyphKey {
-        std::string fontName;
-        FontSize size;
-        std::string ch;
-        Color color;
-        int outline;
-        
-        bool operator<(const GlyphKey& other) const {
-            if (fontName != other.fontName) return fontName < other.fontName;
-            if (size != other.size) return size < other.size;
-            if (ch != other.ch) return ch < other.ch;
-            if (outline != other.outline) return outline < other.outline;
-            // Compare color
-            if (color.r != other.color.r) return color.r < other.color.r;
-            if (color.g != other.color.g) return color.g < other.color.g;
-            if (color.b != other.color.b) return color.b < other.color.b;
-            return color.a < other.color.a;
-        }
-    };
-
     std::map<std::string, std::string> font_paths_;
     std::map<FontKey, TTF_Font*> fonts_;
     std::map<GlyphKey, SDL_Texture*> glyph_cache_; // Performance optimization
     bool initialized_ = false;
 
     TTF_Font* GetFont(FontSize size, const std::string& name = "default");
-    SDL_Texture* GetGlyphTexture(SDL_Renderer* renderer, const std::string& ch, FontSize size, Color color, const std::string& fontName, int outline);
 };
 
 } // namespace sml

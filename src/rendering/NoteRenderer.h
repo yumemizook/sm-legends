@@ -18,6 +18,7 @@ struct NoteFieldConfig {
     double speed_mod       = 1.0;     ///< Speed multiplier (X-Mod) or pixels/sec (C-Mod)
     ScrollModType mod_type = ScrollModType::XMod;
     bool   downscroll      = false;   ///< True = notes fall downward (receptor at bottom)
+    double reverse_pct     = 0.0;     ///< Smooth interpolation for Reverse attack (0.0 to 1.0)
     double screen_height   = 480.0;   ///< Reference height for speed scaling
 };
 
@@ -38,6 +39,13 @@ public:
     /// @return Y-coordinate in screen pixels
     [[nodiscard]] static double GetYPosForBeat(
         double target_beat,
+        const Conductor& conductor,
+        const NoteFieldConfig& config
+    );
+
+    /// Calculate Y-coordinate using pre-calculated row timing data.
+    [[nodiscard]] static double GetYPosForRow(
+        const NoteRow& row,
         const Conductor& conductor,
         const NoteFieldConfig& config
     );

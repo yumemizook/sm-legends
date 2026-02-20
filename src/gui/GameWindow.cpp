@@ -250,6 +250,11 @@ bool GameWindow::Init(int width, int height, const std::string& title) {
         }
     }
 
+    // Hold Judgement Icons
+    hold_good_texture_ = LoadTexture("sprites/holds/good.png", &hold_judge_w_, &hold_judge_h_);
+    hold_ng_texture_   = LoadTexture("sprites/holds/ng.png",   &hold_judge_w_, &hold_judge_h_);
+    hold_bad_texture_  = LoadTexture("sprites/holds/bad.png",  &hold_judge_w_, &hold_judge_h_);
+
     // Load Settings (Keybinds, etc)
     LoadSettings();
     ApplyInputBindings();
@@ -322,11 +327,19 @@ void GameWindow::Shutdown() {
     if (judge_normal_texture_) { SDL_DestroyTexture(judge_normal_texture_); judge_normal_texture_ = nullptr; }
     if (judge_ex_texture_)     { SDL_DestroyTexture(judge_ex_texture_); judge_ex_texture_ = nullptr; }
     if (bg_texture_)           { SDL_DestroyTexture(bg_texture_);           bg_texture_           = nullptr; }
+    if (hold_good_texture_)    { SDL_DestroyTexture(hold_good_texture_);    hold_good_texture_    = nullptr; }
+    if (hold_ng_texture_)      { SDL_DestroyTexture(hold_ng_texture_);      hold_ng_texture_      = nullptr; }
+    if (hold_bad_texture_)     { SDL_DestroyTexture(hold_bad_texture_);     hold_bad_texture_     = nullptr; }
 
     for (auto& pair : jacket_cache_) {
         if (pair.second) SDL_DestroyTexture(pair.second);
     }
     jacket_cache_.clear();
+
+    for (auto& pair : bga_textures_) {
+        if (pair.second) SDL_DestroyTexture(pair.second);
+    }
+    bga_textures_.clear();
 
     for (auto& pair : normal_grade_textures_) {
         if (pair.second) SDL_DestroyTexture(pair.second);
@@ -400,15 +413,20 @@ void GameWindow::HandleEvents() {
 }
 
 void GameWindow::HandleKeyDown(SDL_Keycode key) {
-    if (key == SDLK_BACKSLASH) {
-        if (screen_ == ScreenState::SONG_SELECT || screen_ == ScreenState::GAMEPLAY) {
-            showing_modifier_menu_ = !showing_modifier_menu_;
-            if (showing_modifier_menu_) {
-                modifier_menu_cursor_ = 0;
-            } else {
-                SaveSettings();
+    // Check for COL_SELECT toggle for each player
+    for (int p = 0; p < MAX_PLAYERS; ++p) {
+        if (!players_[p].joined) continue;
+        int action = players_[p].input.OnKeyDown(key);
+        if (action == InputMapper::COL_SELECT) {
+            if (screen_ == ScreenState::SONG_SELECT || screen_ == ScreenState::GAMEPLAY) {
+                players_[p].showing_modifier_menu = !players_[p].showing_modifier_menu;
+                if (players_[p].showing_modifier_menu) {
+                    players_[p].modifier_menu_cursor = 0;
+                } else {
+                    SaveSettings();
+                }
+                return;
             }
-            return;
         }
     }
 
@@ -449,9 +467,11 @@ void GameWindow::HandleKeyDown(SDL_Keycode key) {
         }
     }
 
-    if (showing_modifier_menu_) {
-        HandleKeyDown_ModifierMenu(key);
-        return;
+    for (int p = 0; p < MAX_PLAYERS; ++p) {
+        if (players_[p].showing_modifier_menu) {
+            HandleKeyDown_ModifierMenu(p, key);
+            return;
+        }
     }
 
     switch (screen_) {
@@ -476,90 +496,83 @@ void GameWindow::HandleKeyDown_SongSelect(SDL_Keycode key) {
     if (song_count == 0 && key == SDLK_ESCAPE) { running_ = false; return; }
     if (song_count == 0) return;
 
-    // P(p) Lane 0/3 -> Change P(p) Chart
+    // --- Per-player input routing ---
     for (int p = 0; p < MAX_PLAYERS; ++p) {
         if (!players_[p].joined) continue;
         int lane = players_[p].input.OnKeyDown(key);
-        if (lane == 0 || lane == 3) { // Left or Right
-            const auto& song = scanner_.GetSongs()[static_cast<size_t>(selected_song_)];
-            int chart_count = static_cast<int>(song.charts.size());
-            if (chart_count > 0) {
-                if (lane == 0) selected_chart_[p] = (selected_chart_[p] - 1 + chart_count) % chart_count;
-                else          selected_chart_[p] = (selected_chart_[p] + 1) % chart_count;
-                return; // Early out, we handled the key
+        
+        if (lane == 0 || lane == 3) { // Left or Right -> Change Song
+            if (lane == 0) selected_song_ = (selected_song_ - 1 + song_count) % song_count;
+            else          selected_song_ = (selected_song_ + 1) % song_count;
+            
+            // Reset state for new song
+            for (int i = 0; i < MAX_PLAYERS; ++i) {
+                selected_chart_[i] = 0;
+                players_[i].ready = false;
             }
+            return;
+        }
+        else if (lane == 1 || lane == 2) { // Up or Down -> Double Tap for Chart
+            double now = SDL_GetTicks() / 1000.0;
+            auto& ps = players_[p];
+            bool double_tap = false;
+            
+            if (lane == 1) { // Down
+                if (now - ps.last_down_press_time < 0.35) double_tap = true;
+                ps.last_down_press_time = now;
+            } else { // Up
+                if (now - ps.last_up_press_time < 0.35) double_tap = true;
+                ps.last_up_press_time = now;
+            }
+
+            if (double_tap) {
+                const auto& song = scanner_.GetSongs()[static_cast<size_t>(selected_song_)];
+                int chart_count = static_cast<int>(song.charts.size());
+                if (chart_count > 0) {
+                    // Filter logic: if 2P joined, skip 8-lane charts
+                    int step = (lane == 2) ? -1 : 1;
+                    int next = (selected_chart_[p] + step + chart_count) % chart_count;
+                    
+                    if (num_active_players_ >= 2) {
+                        for (int i = 0; i < chart_count; ++i) {
+                            if (!song.charts[next].Is8Lane()) break;
+                            next = (next + step + chart_count) % chart_count;
+                        }
+                    }
+                    selected_chart_[p] = next;
+
+                    ps.last_up_press_time = 0.0;
+                    ps.last_down_press_time = 0.0;
+                }
+            }
+            return;
+        }
+        else if (lane == InputMapper::COL_START) {
+            // Toggle ready status
+            players_[p].ready = !players_[p].ready;
+            
+            // Check if all joined players are ready
+            bool all_ready = true;
+            for (int i = 0; i < MAX_PLAYERS; ++i) {
+                if (players_[i].joined && !players_[i].ready) {
+                    all_ready = false;
+                    break;
+                }
+            }
+            
+            if (all_ready) {
+                // If all ready, proceed to transition
+                StartGameplay(
+                    static_cast<size_t>(selected_song_),
+                    static_cast<size_t>(selected_chart_[0]));
+            }
+            return;
         }
     }
 
     switch (key) {
         case SDLK_ESCAPE:
             running_ = false;
-            break;
-
-        case SDLK_LEFT:
-            selected_song_ = (selected_song_ - 1 + song_count) % song_count;
-            for (int p = 0; p < MAX_PLAYERS; ++p) selected_chart_[p] = 0;
-            break;
-
-        case SDLK_RIGHT:
-            selected_song_ = (selected_song_ + 1) % song_count;
-            for (int p = 0; p < MAX_PLAYERS; ++p) selected_chart_[p] = 0;
-            break;
-
-        case SDLK_UP: {
-            double now = SDL_GetTicks() / 1000.0;
-            if (now - last_up_press_time_ < 0.35) {
-                // Double tap UP -> Previous Chart (Visually Up / Easier)
-                const auto& song = scanner_.GetSongs()[static_cast<size_t>(selected_song_)];
-                int chart_count = static_cast<int>(song.charts.size());
-                if (chart_count > 0)
-                    selected_chart_[0] = (selected_chart_[0] - 1 + chart_count) % chart_count;
-                last_up_press_time_ = 0.0;
-            } else {
-                last_up_press_time_ = now;
-            }
-            break;
-        }
-
-        case SDLK_DOWN: {
-            double now = SDL_GetTicks() / 1000.0;
-            if (now - last_down_press_time_ < 0.35) {
-                // Double tap DOWN -> Next Chart (Visually Down / Harder)
-                const auto& song = scanner_.GetSongs()[static_cast<size_t>(selected_song_)];
-                int chart_count = static_cast<int>(song.charts.size());
-                if (chart_count > 0)
-                    selected_chart_[0] = (selected_chart_[0] + 1) % chart_count;
-                last_down_press_time_ = 0.0;
-            } else {
-                last_down_press_time_ = now;
-            }
-            break;
-        }
-
-        case SDLK_LEFTBRACKET: {
-            const auto& song = scanner_.GetSongs()[static_cast<size_t>(selected_song_)];
-            int chart_count = static_cast<int>(song.charts.size());
-            if (chart_count > 0)
-                selected_chart_[0] = (selected_chart_[0] - 1 + chart_count) % chart_count;
-            break;
-        }
-
-        case SDLK_RIGHTBRACKET: {
-            const auto& song = scanner_.GetSongs()[static_cast<size_t>(selected_song_)];
-            int chart_count = static_cast<int>(song.charts.size());
-            if (chart_count > 0)
-                selected_chart_[0] = (selected_chart_[0] + 1) % chart_count;
-            break;
-        }
-
-        case SDLK_RETURN:
-        case SDLK_KP_ENTER:
-            // Use P1's selection as primary song, but pass both charts
-            StartGameplay(
-                static_cast<size_t>(selected_song_),
-                static_cast<size_t>(selected_chart_[0])); 
-            // NOTE: StartGameplay currently only takes one chart index.
-            // I will need to update it to handle per-player chart indices.
             break;
 
         case SDLK_t:
@@ -575,15 +588,10 @@ void GameWindow::HandleKeyDown_Gameplay(SDL_Keycode key) {
         if (!players_[p].joined) continue;
         if (players_[p].input.IsLaneKey(key)) {
             int lane = players_[p].input.OnKeyDown(key);
-            if (lane >= 0 && lane < 10 && playing_) { // Actual lanes
+            if (lane >= 0 && lane < 10 && playing_ && !autoplay_) { // Block lane input during autoplay
                 ProcessLaneHit(lane, -1.0, p);
             } else if (lane == InputMapper::COL_START) {
                 // Future: Handle Start button (e.g. ready up)
-            } else if (lane == InputMapper::COL_SELECT) {
-                // Select: Toggle modifier menu for this player
-                if (p == active_player_idx_) {
-                    showing_modifier_menu_ = !showing_modifier_menu_;
-                }
             }
             return;
         }
@@ -592,7 +600,7 @@ void GameWindow::HandleKeyDown_Gameplay(SDL_Keycode key) {
     // Legacy single-player fallback (when no players are joined or no match)
     if (input_.IsLaneKey(key)) {
         int lane = input_.OnKeyDown(key);
-        if (lane >= 0 && playing_) {
+        if (lane >= 0 && playing_ && !autoplay_) { // Block lane input during autoplay
             ProcessLaneHit(lane);
         }
         return;
@@ -705,10 +713,18 @@ void GameWindow::HandleKeyUp_Gameplay(SDL_Keycode key) {
     // Release key on all joined players' input mappers
     for (int p = 0; p < MAX_PLAYERS; ++p) {
         if (players_[p].joined) {
-            players_[p].input.OnKeyUp(key);
+            int lane = players_[p].input.OnKeyUp(key);
+            if (lane >= 0 && lane < 10 && playing_ && !autoplay_) {
+                ProcessLaneHit(lane, -1.0, p, true); // true = is_release
+            }
         }
     }
-    input_.OnKeyUp(key);  // Legacy fallback
+
+    // Legacy fallback
+    int leg_lane = input_.OnKeyUp(key);
+    if (leg_lane >= 0 && playing_ && !autoplay_) {
+        ProcessLaneHit(leg_lane, -1.0, active_player_idx_, true);
+    }
 }
 
 void GameWindow::HandleKeyDown_Results(SDL_Keycode key) {
@@ -732,77 +748,77 @@ void GameWindow::HandleKeyDown_Results(SDL_Keycode key) {
             break;
     }
 }
-void GameWindow::HandleKeyDown_ModifierMenu(SDL_Keycode key) {
-    const int NUM_ITEMS = 9;
-
-    // The content of this function is replaced by HandleModifierMenuInput
-    // and then HandleModifierMenuInput is called from here.
-    HandleModifierMenuInput(key);
+void GameWindow::HandleKeyDown_ModifierMenu(int p, SDL_Keycode key) {
+    HandleModifierMenuInput(p, key);
 }
 
-void GameWindow::HandleModifierMenuInput(SDL_Keycode key) {
-    if (!showing_modifier_menu_) return;
-    int num_items = 10; // Updated to 10 for the new item
+void GameWindow::HandleModifierMenuInput(int p, SDL_Keycode key) {
+    auto& ps = players_[p];
+    if (!ps.showing_modifier_menu) return;
+    int num_items = 12; // Speed, Type, Scroll, Sudden, Hidden, Skin, Effect, Life, Score, Center, Combo, BGA
     
     switch (key) {
         case SDLK_UP:
-            modifier_menu_cursor_ = (modifier_menu_cursor_ - 1 + num_items) % num_items;
+            ps.modifier_menu_cursor = (ps.modifier_menu_cursor - 1 + num_items) % num_items;
             break;
         case SDLK_DOWN:
-            modifier_menu_cursor_ = (modifier_menu_cursor_ + 1) % num_items;
+            ps.modifier_menu_cursor = (ps.modifier_menu_cursor + 1) % num_items;
             break;
         case SDLK_LEFT: {
-            switch (modifier_menu_cursor_) {
+            switch (ps.modifier_menu_cursor) {
                 case 0: { // Speed
-                    if (field_config_.mod_type == ScrollModType::CMod)
-                        field_config_.speed_mod = std::max(50.0, field_config_.speed_mod - 50.0);
+                    if (ps.field_config.mod_type == ScrollModType::CMod)
+                        ps.field_config.speed_mod = std::max(50.0, ps.field_config.speed_mod - 50.0);
                     else
-                        field_config_.speed_mod = std::max(0.25, field_config_.speed_mod - 0.25);
-                    players_[active_player_idx_].field_config.speed_mod = field_config_.speed_mod;
+                        ps.field_config.speed_mod = std::max(0.25, ps.field_config.speed_mod - 0.25);
                 } break;
                 case 1: // Mod Type
-                    field_config_.mod_type = (field_config_.mod_type == ScrollModType::XMod) ? ScrollModType::CMod : ScrollModType::XMod;
-                    field_config_.speed_mod = (field_config_.mod_type == ScrollModType::XMod) ? 2.0 : 400.0;
-                    players_[active_player_idx_].field_config.mod_type = field_config_.mod_type;
-                    players_[active_player_idx_].field_config.speed_mod = field_config_.speed_mod;
+                    ps.field_config.mod_type = (ps.field_config.mod_type == ScrollModType::XMod) ? ScrollModType::CMod : ScrollModType::XMod;
+                    ps.field_config.speed_mod = (ps.field_config.mod_type == ScrollModType::XMod) ? 2.0 : 400.0;
                     break;
                 case 2: // Scroll
-                    field_config_.downscroll = !field_config_.downscroll;
-                    field_config_.receptor_y = field_config_.downscroll ? height_ * 0.85 : height_ * 0.15;
-                    players_[active_player_idx_].field_config.downscroll = field_config_.downscroll;
-                    players_[active_player_idx_].field_config.receptor_y = field_config_.receptor_y;
+                    ps.field_config.downscroll = !ps.field_config.downscroll;
+                    ps.field_config.receptor_y = ps.field_config.downscroll ? height_ * 0.85 : height_ * 0.15;
                     break;
                 case 3: // Sudden+
-                    sudden_plus_val_ = std::max(0.0f, sudden_plus_val_ - 0.05f);
+                    ps.sudden_plus_val = std::max(0.0f, ps.sudden_plus_val - 0.05f);
                     break;
                 case 4: // Hidden+
-                    hidden_plus_val_ = std::max(0.0f, hidden_plus_val_ - 0.05f);
+                    ps.hidden_plus_val = std::max(0.0f, ps.hidden_plus_val - 0.05f);
                     break;
                 case 5: // Noteskin
                     if (!available_noteskins_.empty()) {
-                        noteskin_index_ = (noteskin_index_ - 1 + (int)available_noteskins_.size()) % (int)available_noteskins_.size();
-                        LoadNoteskin(available_noteskins_[noteskin_index_]);
+                        ps.noteskin_index = (ps.noteskin_index - 1 + (int)available_noteskins_.size()) % (int)available_noteskins_.size();
+                        if (p == active_player_idx_) LoadNoteskin(available_noteskins_[ps.noteskin_index]);
                     }
                     break;
                 case 6: // Effects
-                    effect_mode_ = (effect_mode_ - 1 + 3) % 3;
+                    ps.effect_mode = (ps.effect_mode - 1 + 3) % 3;
                     break;
                 case 7: { // Life Mode
-                    int flare = life_meter_.GetFlareLevel();
-                    if (life_meter_.GetType() == LifeType::STANDARD) life_meter_.Init(LifeType::FLARE, 5);
-                    else if (life_meter_.GetType() == LifeType::LIFE4) life_meter_.Init(LifeType::STANDARD);
-                    else if (life_meter_.GetType() == LifeType::RISKY) life_meter_.Init(LifeType::LIFE4);
-                    else if (life_meter_.GetType() == LifeType::FLARE) {
-                        if (flare > 1) life_meter_.Init(LifeType::FLARE, flare - 1);
-                        else life_meter_.Init(LifeType::RISKY);
+                    int flare = ps.life_meter.GetFlareLevel();
+                    if (ps.life_meter.GetType() == LifeType::STANDARD) ps.life_meter.Init(LifeType::FLARE, 5);
+                    else if (ps.life_meter.GetType() == LifeType::LIFE4) ps.life_meter.Init(LifeType::STANDARD);
+                    else if (ps.life_meter.GetType() == LifeType::RISKY) ps.life_meter.Init(LifeType::LIFE4);
+                    else if (ps.life_meter.GetType() == LifeType::FLARE) {
+                        if (flare > 1) ps.life_meter.Init(LifeType::FLARE, flare - 1);
+                        else ps.life_meter.Init(LifeType::RISKY);
                     }
                 } break;
                 case 8: // Scoring
-                    ex_mode_ = !ex_mode_;
+                    ps.ex_mode = !ps.ex_mode;
                     break;
                 case 9: // Center 1P
-                    center_1p_ = !center_1p_;
-                    SetupPlayerFieldLayout();
+                    if (p == 0) {
+                        center_1p_ = !center_1p_;
+                        SetupPlayerFieldLayout();
+                    }
+                    break;
+                case 10: // Combo Display
+                    ps.combo_display_mode = static_cast<ComboDisplayMode>((static_cast<int>(ps.combo_display_mode) - 1 + 19) % 19);
+                    break;
+                case 11: // BGA Brightness
+                    ps.bga_brightness = static_cast<BGABrightness>((static_cast<int>(ps.bga_brightness) - 1 + 5) % 5);
                     break;
                 default: break;
             }
@@ -811,69 +827,73 @@ void GameWindow::HandleModifierMenuInput(SDL_Keycode key) {
         case SDLK_RIGHT:
         case SDLK_RETURN:
         case SDLK_KP_ENTER: {
-            switch (modifier_menu_cursor_) {
+            switch (ps.modifier_menu_cursor) {
                 case 0: { // Speed
-                    if (field_config_.mod_type == ScrollModType::CMod)
-                        field_config_.speed_mod += 50.0;
+                    if (ps.field_config.mod_type == ScrollModType::CMod)
+                        ps.field_config.speed_mod += 50.0;
                     else
-                        field_config_.speed_mod += 0.25;
-                    players_[active_player_idx_].field_config.speed_mod = field_config_.speed_mod;
+                        ps.field_config.speed_mod += 0.25;
                 } break;
                 case 1: // Mod Type
-                    field_config_.mod_type = (field_config_.mod_type == ScrollModType::XMod) ? ScrollModType::CMod : ScrollModType::XMod;
-                    field_config_.speed_mod = (field_config_.mod_type == ScrollModType::XMod) ? 2.0 : 400.0;
-                    players_[active_player_idx_].field_config.mod_type = field_config_.mod_type;
-                    players_[active_player_idx_].field_config.speed_mod = field_config_.speed_mod;
+                    ps.field_config.mod_type = (ps.field_config.mod_type == ScrollModType::XMod) ? ScrollModType::CMod : ScrollModType::XMod;
+                    ps.field_config.speed_mod = (ps.field_config.mod_type == ScrollModType::XMod) ? 2.0 : 400.0;
                     break;
                 case 2: // Scroll
-                    field_config_.downscroll = !field_config_.downscroll;
-                    field_config_.receptor_y = field_config_.downscroll ? height_ * 0.85 : height_ * 0.15;
-                    players_[active_player_idx_].field_config.downscroll = field_config_.downscroll;
-                    players_[active_player_idx_].field_config.receptor_y = field_config_.receptor_y;
+                    ps.field_config.downscroll = !ps.field_config.downscroll;
+                    ps.field_config.receptor_y = ps.field_config.downscroll ? height_ * 0.85 : height_ * 0.15;
                     break;
                 case 3: // Sudden+
-                    sudden_plus_val_ = std::min(0.8f, sudden_plus_val_ + 0.05f);
+                    ps.sudden_plus_val = std::min(0.8f, ps.sudden_plus_val + 0.05f);
                     break;
                 case 4: // Hidden+
-                    hidden_plus_val_ = std::min(0.8f, hidden_plus_val_ + 0.05f);
+                    ps.hidden_plus_val = std::min(0.8f, ps.hidden_plus_val + 0.05f);
                     break;
                 case 5: // Noteskin
                     if (!available_noteskins_.empty()) {
-                        noteskin_index_ = (noteskin_index_ + 1) % (int)available_noteskins_.size();
-                        LoadNoteskin(available_noteskins_[noteskin_index_]);
+                        ps.noteskin_index = (ps.noteskin_index + 1) % (int)available_noteskins_.size();
+                        if (p == active_player_idx_) LoadNoteskin(available_noteskins_[ps.noteskin_index]);
                     }
                     break;
                 case 6: // Effects
-                    effect_mode_ = (effect_mode_ + 1) % 3;
+                    ps.effect_mode = (ps.effect_mode + 1) % 3;
                     break;
                 case 7: { // Life Mode
-                    int flare = life_meter_.GetFlareLevel();
-                    if (life_meter_.GetType() == LifeType::STANDARD) life_meter_.Init(LifeType::LIFE4);
-                    else if (life_meter_.GetType() == LifeType::LIFE4) life_meter_.Init(LifeType::RISKY);
-                    else if (life_meter_.GetType() == LifeType::RISKY) life_meter_.Init(LifeType::FLARE, 1);
-                    else if (life_meter_.GetType() == LifeType::FLARE) {
-                        if (flare < 5) life_meter_.Init(LifeType::FLARE, flare + 1);
-                        else life_meter_.Init(LifeType::STANDARD);
+                    int flare = ps.life_meter.GetFlareLevel();
+                    if (ps.life_meter.GetType() == LifeType::STANDARD) ps.life_meter.Init(LifeType::LIFE4);
+                    else if (ps.life_meter.GetType() == LifeType::LIFE4) ps.life_meter.Init(LifeType::RISKY);
+                    else if (ps.life_meter.GetType() == LifeType::RISKY) ps.life_meter.Init(LifeType::FLARE, 1);
+                    else if (ps.life_meter.GetType() == LifeType::FLARE) {
+                        if (flare < 5) ps.life_meter.Init(LifeType::FLARE, flare + 1);
+                        else ps.life_meter.Init(LifeType::STANDARD);
                     }
                 } break;
                 case 8: // Scoring
-                    ex_mode_ = !ex_mode_;
+                    ps.ex_mode = !ps.ex_mode;
                     break;
                 case 9: // Center 1P
-                    center_1p_ = !center_1p_;
-                    SetupPlayerFieldLayout();
+                    if (p == 0) {
+                        center_1p_ = !center_1p_;
+                        SetupPlayerFieldLayout();
+                    }
+                    break;
+                case 10: // Combo Display
+                    ps.combo_display_mode = static_cast<ComboDisplayMode>((static_cast<int>(ps.combo_display_mode) + 1) % 19);
+                    break;
+                case 11: // BGA Brightness
+                    ps.bga_brightness = static_cast<BGABrightness>((static_cast<int>(ps.bga_brightness) + 1) % 5);
                     break;
                 default: break;
             }
             break;
         }
         case SDLK_ESCAPE:
-        case SDLK_BACKSLASH:
-            showing_modifier_menu_ = false;
+            ps.showing_modifier_menu = false;
+            SaveActiveProfile(p);
             SaveSettings();
             break;
     }
     SaveSettings(); // Save settings after any change in the menu
+    SaveActiveProfile(p);
 }
 
 void GameWindow::HandleKeyDown_Options(SDL_Keycode key) {
@@ -973,6 +993,7 @@ void GameWindow::HandleKeyDown_Calibration(SDL_Keycode key) {
                             active_simfile_->GetEffectiveBPMs(*current_chart_),
                             active_simfile_->GetEffectiveStops(*current_chart_),
                             active_simfile_->GetEffectiveScrolls(*current_chart_),
+                            active_simfile_->GetEffectiveSpeeds(*current_chart_),
                             total_offset
                         );
                     }
@@ -1025,6 +1046,7 @@ void GameWindow::HandleKeyDown_Calibration(SDL_Keycode key) {
              active_simfile_->GetEffectiveBPMs(*current_chart_),
              active_simfile_->GetEffectiveStops(*current_chart_),
              active_simfile_->GetEffectiveScrolls(*current_chart_),
+             active_simfile_->GetEffectiveSpeeds(*current_chart_),
              total_offset
          );
     }
@@ -1039,7 +1061,7 @@ void GameWindow::HandleControllerButtonDown(SDL_GameControllerButton button) {
     }
     
     int lane = input_.OnButtonDown(button);
-    if (lane >= 0 && playing_ && screen_ == ScreenState::GAMEPLAY) {
+    if (lane >= 0 && playing_ && screen_ == ScreenState::GAMEPLAY && !autoplay_) { // Block lane input during autoplay
         ProcessLaneHit(lane);
     }
 }
@@ -1127,6 +1149,7 @@ void GameWindow::StartGameplay(size_t song_index, size_t chart_index) {
         ps.row_best_error.assign(num_rows, 999.0f);
         
         ps.total_hittable_notes = 0;
+        ps.combo_display_mode = static_cast<ComboDisplayMode>(ps.profile.combo_display_mode);
         for (const auto& row : ps.current_chart->note_rows) {
             for (auto nt : row.columns) if (IsTap(nt)) ps.total_hittable_notes++;
         }
@@ -1138,6 +1161,7 @@ void GameWindow::StartGameplay(size_t song_index, size_t chart_index) {
         active_simfile_->GetEffectiveBPMs(*master_chart),
         active_simfile_->GetEffectiveStops(*master_chart),
         active_simfile_->GetEffectiveScrolls(*master_chart),
+        active_simfile_->GetEffectiveSpeeds(*master_chart),
         total_offset
     );
 
@@ -1145,6 +1169,7 @@ void GameWindow::StartGameplay(size_t song_index, size_t chart_index) {
     current_chart_ = master_chart; 
     
     loaded_simfile_.reset();
+    auto_bga_file_ = ""; // Reset auto-discovered BGA before DECIDE screen
     decide_timer_ = 7.0; 
     ChangeScreen(ScreenState::DECIDE);
 
@@ -1154,12 +1179,12 @@ void GameWindow::StartGameplay(size_t song_index, size_t chart_index) {
     decide_timer_ = 7.0; 
     ChangeScreen(ScreenState::DECIDE);
 
-    std::printf("Playing: %s - %s [%s %s %d]\n",
+    std::printf("Playing: %s - %s [%s %s %s]\n",
         active_simfile_->artist.c_str(),
         active_simfile_->title.c_str(),
         current_chart_->chart_type.c_str(),
         current_chart_->difficulty_name.c_str(),
-        current_chart_->difficulty_meter);
+        FormatMeter(current_chart_->custom_difficulty).c_str());
 }
 
 void GameWindow::StartGameplayDirect() {
@@ -1181,10 +1206,11 @@ void GameWindow::StartGameplayDirect() {
     fail_animation_timer_ = 0.0;
     clear_type_ = ClearType::ALL_PERFECT_EXTRAORDINARY;
     clear_animation_timer_ = 0.0;
+    time_scale_ = 1.0;
     hit_flashes_.clear();
     hit_history_.clear();
     results_ex_mode_ = false;
-    autoplay_ = false;
+    // autoplay_ persists across chart starts — toggled by F8
     std::memset(normal_judge_counts_, 0, sizeof(normal_judge_counts_));
     std::memset(ex_judge_counts_, 0, sizeof(ex_judge_counts_));
 
@@ -1195,6 +1221,14 @@ void GameWindow::StartGameplayDirect() {
         SDL_DestroyTexture(bg_texture_);
         bg_texture_ = nullptr;
     }
+    for (auto& pair : bga_textures_) {
+        if (pair.second) SDL_DestroyTexture(pair.second);
+    }
+    bga_textures_.clear();
+    current_bga_tex_ = nullptr;
+    current_bga_file_ = "";
+    last_bga_beat_ = -1.0;
+    video_path_ = "";
     if (active_simfile_ && !active_simfile_->background_path.empty()) {
         fs::path sim_dir(active_simfile_->directory);
         fs::path bg_rel(active_simfile_->background_path);
@@ -1211,16 +1245,39 @@ void GameWindow::StartGameplayDirect() {
     double last_note_beat = 0.0;
 
     if (current_chart_) {
+        // --- BGA Auto-Discovery ---
+        auto_bga_file_ = "";
+        if (active_simfile_ && active_simfile_->bg_changes.empty()) {
+            fs::path sim_dir(active_simfile_->directory);
+            if (fs::exists(sim_dir)) {
+                for (const auto& entry : fs::directory_iterator(sim_dir)) {
+                    if (entry.is_regular_file()) {
+                        std::string ext = entry.path().extension().string();
+                        for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                        if (ext == ".avi" || ext == ".mpg" || ext == ".mpeg" || ext == ".mp4" || ext == ".flv" || ext == ".mkv" || ext == ".webm") {
+                            auto_bga_file_ = entry.path().filename().string();
+                            std::printf("Auto-discovered BGA: %s\n", auto_bga_file_.c_str());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // Find timings
         for (const auto& row : current_chart_->note_rows) {
             bool has_hittable = false;
+            bool has_visible = false;
             for (auto nt : row.columns) {
                 if (IsTap(nt)) {
                     total_hittable_notes_++;
                     has_hittable = true;
                 }
+                if (IsVisibleNote(nt)) {
+                    has_visible = true;
+                }
             }
-            if (has_hittable) {
+            if (has_visible) {
                 if (first_note_beat < 0.0) first_note_beat = row.beat;
                 if (row.beat > last_note_beat) last_note_beat = row.beat;
             }
@@ -1231,8 +1288,10 @@ void GameWindow::StartGameplayDirect() {
             active_simfile_->GetEffectiveBPMs(*current_chart_),
             active_simfile_->GetEffectiveStops(*current_chart_),
             active_simfile_->GetEffectiveScrolls(*current_chart_),
+            active_simfile_->GetEffectiveSpeeds(*current_chart_),
             total_offset
         );
+        conductor_.PopulateChartTiming(const_cast<NoteChart&>(*current_chart_));
 
         double first_note_time = (first_note_beat >= 0.0) ? conductor_.BeatToTime(first_note_beat) : 0.0;
         chart_end_time_ = conductor_.BeatToTime(last_note_beat) + 2.0;
@@ -1255,7 +1314,7 @@ void GameWindow::StartGameplayDirect() {
 
         // 5. Initialize hit masks and per-row error tracking
         note_hit_masks_.assign(current_chart_->note_rows.size(), 0);
-        row_best_error_.assign(current_chart_->note_rows.size(), 0.0);
+        row_best_error_.assign(current_chart_->note_rows.size(), 999.0);
 
         // 6. Initialize Life Meter
         life_meter_.Init(life_meter_.GetType(), life_meter_.GetFlareLevel());
@@ -1296,10 +1355,10 @@ void GameWindow::StartGameplayDirect() {
             
             ps.current_chart = current_chart_;
             ps.note_hit_masks.assign(current_chart_->note_rows.size(), 0);
-            ps.row_best_error.assign(current_chart_->note_rows.size(), 0.0);
+            ps.row_best_error.assign(current_chart_->note_rows.size(), 999.0);
             ps.total_hittable_notes = total_hittable_notes_;
             ps.chart_end_time = chart_end_time_;
-            ps.life_meter.Init(life_meter_.GetType(), life_meter_.GetFlareLevel());
+            ps.life_meter.Init(ps.life_meter.GetType(), ps.life_meter.GetFlareLevel());
         }
     }
 
@@ -1354,6 +1413,7 @@ void GameWindow::ReturnToSongSelect() {
     is_calibrating_ = false;
     current_chart_ = nullptr;
     active_simfile_ = nullptr;
+    auto_bga_file_ = ""; // Reset auto-discovered BGA
     loaded_simfile_.reset();
     input_.Reset();
 
@@ -1363,10 +1423,9 @@ void GameWindow::ReturnToSongSelect() {
 
 void GameWindow::OnEnterSongSelect() {
     if (scanner_.GetSongs().empty()) return;
-    // This function is intended to be called when entering the song select screen.
-    // The previous code here was for starting gameplay, which is incorrect for an "OnEnterSongSelect" handler.
-    // If there's specific initialization needed for song select, it should go here.
-    // For now, it's left empty as per the instruction's implied context.
+    for (int i = 0; i < MAX_PLAYERS; ++i) {
+        players_[i].ready = false;
+    }
 }
 
 void GameWindow::ShowResults() {
@@ -1379,12 +1438,12 @@ void GameWindow::ShowResults() {
         results_title_ = active_simfile_->title;
     }
     if (current_chart_) {
-        char buf[64];
-        std::snprintf(buf, sizeof(buf), "%s %s %d",
-            current_chart_->chart_type.c_str(),
-            current_chart_->difficulty_name.c_str(),
-            current_chart_->difficulty_meter);
-        results_chart_info_ = buf;
+        std::string mode_name = GetChartModeName(current_chart_->chart_type);
+        std::string diff_name = current_chart_->difficulty_name;
+        if (current_chart_->variant == ChartVariant::Wild) diff_name = "WILD";
+        
+        std::string meter_str = FormatMeter(current_chart_->custom_difficulty);
+        results_chart_info_ = mode_name + " " + diff_name + " " + meter_str;
 
         // --- NEW: Calculate and Save High Score ---
         double normal_acc = (total_hittable_notes_ > 0) ? (normal_score_ / total_hittable_notes_) : 0.0;
@@ -1474,29 +1533,33 @@ void GameWindow::RenderResults() {
         // Slide in from left
         int x_off = static_cast<int>(-50 * (1.0 - header_alpha));
 
-        font_.DrawText(renderer_, 40 + x_off, 30, "RESULTS", {255, 255, 255, a}, FontSize::TITLE, TextAlign::LEFT);
+        font_.DrawText(renderer_, 40 + x_off, 25, "RESULTS", {255, 255, 255, a}, FontSize::TITLE, TextAlign::LEFT);
         
-        int y_title = 30;
+        int y_title = 25;
         font_.DrawText(renderer_, width_ - 40 - x_off, y_title, results_title_, {200, 200, 220, a}, FontSize::MEDIUM, TextAlign::RIGHT, 1.0, "score");
-        font_.DrawText(renderer_, width_ - 40 - x_off, y_title + 25, results_chart_info_, {150, 150, 170, a}, FontSize::SMALL, TextAlign::RIGHT);
+        font_.DrawText(renderer_, width_ - 40 - x_off, y_title + 30, results_chart_info_, {150, 150, 170, a}, FontSize::SMALL, TextAlign::RIGHT);
     }
 
-    // --- 2P-friendly Columns ---
-    if (results_reveal_timer_ > 0.2) {
-        if (num_active_players_ >= 2) {
-            // Player 1 Column (Left Half)
-            RenderResultsPanel(20, 100, width_ / 2 - 40, height_ - 150, players_[0]);
-            
-            // Player 2 Column (Right Half)
-            if (players_[1].joined) {
-                RenderResultsPanel(width_ / 2 + 20, 100, width_ / 2 - 40, height_ - 150, players_[1]);
-            }
-        } else {
-            // 1P Centered or Side-Aligned
-            int panel_w = width_ / 2 + 100;
-            int panel_x = (width_ - panel_w) / 2;
-            RenderResultsPanel(panel_x, 100, panel_w, height_ - 150, players_[active_player_idx_]);
-        }
+    // --- Panel Layout ---
+    int py = 110;
+    int ph = height_ - 170;
+
+    if (num_active_players_ >= 2) {
+        // Player 1 Column (Left Half, expanded)
+        RenderResultsPanel(0, results_reveal_timer_, 15, py, width_ / 2 - 25, ph);
+        
+        // Player 2 Column (Right Half, expanded)
+        RenderResultsPanel(1, results_reveal_timer_, width_ / 2 + 10, py, width_ / 2 - 25, ph);
+    } else {
+        // Calculate which player is active
+        int active_p = players_[1].joined ? 1 : 0;
+        
+        // Use consistent half-screen panel on their side
+        int pw = width_ / 2 - 25;
+        // Strictly align to the side of the player
+        int px = (active_p == 0) ? 15 : width_ / 2 + 10;
+
+        RenderResultsPanel(active_p, results_reveal_timer_, px, py, pw, ph);
     }
 
     // --- Footer ---
@@ -1507,351 +1570,241 @@ void GameWindow::RenderResults() {
     }
 }
 
-void GameWindow::RenderResultsPanel(int x, int y, int w, int h, const PlayerState& ps) {
-    double d_normal_score = 0;
-    double d_ex_score = 0;
+void GameWindow::RenderResultsPanel(int p, double t_total, int x, int y, int w, int h) {
+    if (p < 0 || p >= MAX_PLAYERS) return;
+    const auto& ps = players_[p];
+    if (!ps.joined) return;
+    
+    // 1. Calculations
     int total_notes = ps.total_hittable_notes;
+    double normal_acc = (total_notes > 0) ? (ps.normal_score / total_notes) : 0.0;
+    double ex_acc     = (total_notes > 0) ? (ps.ex_score / total_notes) : 0.0;
     
-    // Stats counters (for display)
-    int counts[9] = {0};
-    int fast_count = 0, slow_count = 0;
-    double error_sum = 0.0, error_sq_sum = 0.0;
-    int valid_hits = 0;
-
-    // Re-judge
-    for (const auto& hit : ps.hit_history) {
-        if (hit.judge == Judgement::MISS) {
-            if (results_ex_mode_) counts[8]++; else counts[8]++; // Increment miss for display
-            continue;
-        }
-        
-        // 1. Calculate Normal Score
-        Judgement j_norm = sml::ClassifyHit(std::abs(hit.error), false);
-        d_normal_score += sml::JudgeWeight(j_norm, false);
-
-        // 2. Calculate EX Score
-        Judgement j_ex = sml::ClassifyHit(std::abs(hit.error), true);
-        d_ex_score += sml::JudgeWeight(j_ex, true);
-
-        // 3. Update Display Counts (Based on Mode)
-        Judgement j_display = results_ex_mode_ ? j_ex : j_norm;
-        
-        int idx = -1;
-        switch (j_display) {
-            case Judgement::PEXTRA: idx=0; break;
-            case Judgement::PCRIT: idx=1; break;
-            case Judgement::PERFECT: idx=2; break; 
-            case Judgement::PERFECT_LOW: idx=3; break;
-            case Judgement::GREAT_HIGH: idx=4; break;
-            case Judgement::GREAT: idx=5; break;
-            case Judgement::GREAT_LOW: idx=6; break;
-            case Judgement::GOOD: idx=7; break;
-            case Judgement::MISS: idx=8; break;
-            default: break;
-        }
-        
-        if (idx >= 0) {
-            counts[idx]++;
-            valid_hits++;
-            error_sum += hit.error;
-            error_sq_sum += (hit.error * hit.error);
-            if (hit.error < -0.003) fast_count++;
-            else if (hit.error > 0.003) slow_count++;
+    // Timing stats
+    double mean = 0.0, stddev = 0.0;
+    int fast = 0, slow = 0, hit_count = 0;
+    for (const auto& hr : ps.hit_history) {
+        if (hr.judge != Judgement::MISS && hr.judge != Judgement::NONE) {
+            mean += hr.error;
+            hit_count++;
+            if (hr.error < -0.0001) fast++;
+            else if (hr.error > 0.0001) slow++;
         }
     }
-    // Add missing misses to counts
-    if ((int)ps.hit_history.size() < total_notes) counts[8] += (total_notes - (int)ps.hit_history.size());
-
-    // Recalculate percentages
-    // Normal Score is traditionally Percentage of max points. 
-    // Simplified: Just use the stored members for SCORES, but update COUNTS.
-    // Wait, if we toggle EX mode, the score numbers normally don't change in some games, but in others they do.
-    // Sm-legends seems to track them separately.
-    // Let's use the stored scores for now to avoid logic drift, but use the re-calculated counts.
-    double normal_acc = (total_notes > 0) ? (d_normal_score / total_notes) : 0.0;
-    double ex_acc     = (total_notes > 0) ? (d_ex_score / total_notes) : 0.0;
-
-    // --- Determine Main vs Secondary Display ---
-    bool show_ex_primary = results_ex_mode_;
-    
-    // --- Animation Logic ---
-    double t = results_reveal_timer_ - 0.2; // Start after 0.2s of panel reveal (delay from RenderResults)
-    if (t < 0) t = 0;
-    
-    double acc_progress = std::min(1.0, t / 1.0); // 1.0s duration for score rise
-    // Ease out quadratic for smoother feel
-    acc_progress = 1.0 - (1.0 - acc_progress) * (1.0 - acc_progress);
-
-    double anim_normal_acc = normal_acc * acc_progress;
-    double anim_ex_acc     = ex_acc * acc_progress;
-
-    // Helper to get Texture/Color/Text for display
-    struct DisplayInfo {
-        SDL_Texture* icon;
-        std::string text_grade; // Fallback
-        Color color;
-        double value;
-        bool is_percentage; // Format as % or raw
-    };
-
-    // 1. Prepare Normal Info
-    DisplayInfo info_normal;
-    info_normal.value = anim_normal_acc;
-    info_normal.is_percentage = true;
-    {
-        std::string g = "D"; Color c = {150,150,150,255};
-        if (clear_type_ == ClearType::FAIL) { g="E"; c={255,40,40,255}; }
-        else if (normal_acc >= 100.9) { g="SSS+"; c={255,255,255,255}; }
-        else if (normal_acc >= 100.75){ g="SSS"; c={255,255,240,255}; }
-        else if (normal_acc >= 100.5) { g="SS+"; c={255,255,200,255}; }
-        else if (normal_acc >= 100.0) { g="SS"; c={255,255,100,255}; }
-        else if (normal_acc >= 99.0)  { g="S+"; c={255,240,100,255}; }
-        else if (normal_acc >= 97.5)  { g="S"; c={255,220,100,255}; }
-        else if (normal_acc >= 95.0)  { g="AAA"; c={220,200,255,255}; }
-        else if (normal_acc >= 92.5)  { g="AA"; c={180,180,255,255}; }
-        else if (normal_acc >= 90.0)  { g="A"; c={150,150,255,255}; }
-        else if (normal_acc >= 80.0)  { g="BBB"; c={150,255,150,255}; }
-        else if (normal_acc >= 70.0)  { g="BB"; c={100,255,100,255}; }
-        else if (normal_acc >= 60.0)  { g="B"; c={50,255,50,255}; }
-        else if (normal_acc >= 50.0)  { g="C"; c={255,150,50,255}; }
-        
-        info_normal.text_grade = g;
-        info_normal.color = c;
-        info_normal.icon = nullptr;
-        // Try texture
-        std::string key = g;
-        size_t plus = key.find('+');
-        if (plus != std::string::npos) key.replace(plus, 1, "plus");
-        if (normal_grade_textures_.count(key)) info_normal.icon = normal_grade_textures_[key];
+    if (hit_count > 0) {
+        mean /= hit_count;
+        double variance = 0.0;
+        for (const auto& hr : ps.hit_history) {
+            if (hr.judge != Judgement::MISS && hr.judge != Judgement::NONE) {
+                variance += (hr.error - mean) * (hr.error - mean);
+            }
+        }
+        stddev = std::sqrt(variance / hit_count);
     }
 
-    // 2. Prepare EX Info
-    DisplayInfo info_ex;
-    info_ex.value = anim_ex_acc;
-    info_ex.is_percentage = true; 
-    {
-        int stars = 0; Color c = {100,100,100,255};
-        if (ex_acc >= 100.0)     { stars=6; c={255,215,0,255}; }
-        else if (ex_acc >= 95.0) { stars=5; c={255,255,255,255}; }
-        else if (ex_acc >= 88.5) { stars=4; c={100,255,100,255}; }
-        else if (ex_acc >= 82.0) { stars=3; c={100,100,255,255}; }
-        else if (ex_acc >= 73.0) { stars=2; c={255,100,255,255}; }
-        else if (ex_acc >= 60.0) { stars=1; c={255,60,60,255}; }
-        
-        info_ex.text_grade = "";
-        for(int i=0;i<stars;++i) info_ex.text_grade += "* ";
-        info_ex.color = c;
-        info_ex.icon = nullptr;
-        if (stars > 0 && ex_grade_textures_.count(stars)) info_ex.icon = ex_grade_textures_[stars];
-    }
-
-    DisplayInfo main_info = show_ex_primary ? info_ex : info_normal;
-    DisplayInfo sec_info  = show_ex_primary ? info_normal : info_ex;
-
-    // 2. Layout & Spacing
-    int px = static_cast<int>(w * 0.1); 
-    int content_w = w - (px * 2);
-    int left_x = x + px;
-    int right_x = x + w - px;
+    // Panel reveal delay (staggered for P2)
+    double t = t_total - (p * 0.2) - 0.2; 
+    if (t < 0) return;
     
-    int cur_y = y + static_cast<int>(h * 0.05);
+    // Panel Background Fade In
+    uint8_t bg_a = static_cast<uint8_t>(220 * std::min(1.0, t / 0.3));
+    DrawRect(x, y, w, h, {15, 15, 25, bg_a});
+    DrawRectOutline(x, y, w, h, {80, 80, 110, static_cast<uint8_t>(bg_a * 0.8)});
+    
+    // Accent Side Bar
+    Color p_col = (p == 0) ? Color{100, 150, 255, 255} : Color{255, 100, 150, 255};
+    DrawRect(x, y, 4, h, {p_col.r, p_col.g, p_col.b, bg_a});
 
-    // --- MAIN DISPLAY (Large) ---
-    // Icon on Left, Score on Right
-    if (acc_progress > 0.5) {
-        if (main_info.icon) {
-            int tw, th;
-            SDL_QueryTexture(main_info.icon, nullptr, nullptr, &tw, &th);
-            double scale = 1.0;
-            if (th > 0) scale = 100.0 / th; // Max height 100
-            int dw = (int)(tw * scale);
-            int dh = (int)(th * scale);
-            SDL_Rect r = { left_x, cur_y, dw, dh };
-            SDL_RenderCopy(renderer_, main_info.icon, nullptr, &r);
-            
-            // Score next to it (Outline=true, Bold=true, Resolution=GIANT)
-            // High-res fix: Use Giant font (120px) and scale down slightly (0.8) for crisp 100px height
-            // Adjusted thickness/weight to match Gameplay (HUGE 54px @ weight 1/outline 2 -> GIANT 120px @ weight 2/outline 5)
-            font_.DrawAccuracy(renderer_, left_x + dw + 30, cur_y + dh/2 - 20, main_info.value, {255, 255, 255, 255}, TextAlign::LEFT, 0.8, main_info.is_percentage ? 4 : 2, true, true, {0,0,0,0}, FontSize::GIANT, FontSize::LARGE, 2, 5);
+    int cx = x + w / 2;
+    int cur_y = y + 20;
+
+    // 1. Player Name
+    font_.DrawText(renderer_, cx, cur_y, ps.profile.name, {255, 255, 255, bg_a}, FontSize::MEDIUM, TextAlign::CENTER);
+    cur_y += 40;
+
+    // 2. Grade & EX Star Reveal (Animated @ 0.5s)
+    double grade_t = t - 0.5;
+    if (grade_t > 0) {
+        double grade_alpha = std::min(1.0, grade_t / 0.5);
+        double grade_pop = 1.0 + 0.15 * std::pow(1.0 - grade_alpha, 3.0);
+        uint8_t ga = static_cast<uint8_t>(255 * grade_alpha);
+
+        if (ps.failed_sequence) {
+             font_.DrawText(renderer_, cx, cur_y + 30, "FAILED", {255, 60, 60, ga}, FontSize::GIANT, TextAlign::CENTER, grade_pop);
+             cur_y += 100;
         } else {
-            // Fallback text
-            font_.DrawText(renderer_, left_x + 60, cur_y + 40, main_info.text_grade, main_info.color, FontSize::HUGE, TextAlign::CENTER);
-            font_.DrawAccuracy(renderer_, left_x + 180, cur_y + 30, main_info.value, {255, 255, 255, 255}, TextAlign::LEFT, 0.7, main_info.is_percentage ? 4 : 2, true, true, {0,0,0,0}, FontSize::GIANT, FontSize::LARGE, 2, 5);
+            // Normal Grade Lookup
+            auto getGrade = [&](double acc) -> std::string {
+                if (acc >= 100.9) return "SSSplus";
+                if (acc >= 100.75) return "SSS";
+                if (acc >= 100.5) return "SSplus";
+                if (acc >= 100.0) return "SS";
+                if (acc >= 99.0) return "Splus";
+                if (acc >= 97.5) return "S";
+                if (acc >= 95.0) return "AAA";
+                if (acc >= 92.5) return "AA";
+                if (acc >= 90.0) return "A";
+                if (acc >= 80.0) return "BBB";
+                if (acc >= 70.0) return "BB";
+                if (acc >= 60.0) return "B";
+                if (acc >= 50.0) return "C";
+                return "D";
+            };
+            std::string grade_key = getGrade(normal_acc);
+            
+            // Draw Normal Grade Sprite
+            SDL_Texture* gn_tex = normal_grade_textures_.count(grade_key) ? normal_grade_textures_[grade_key] : nullptr;
+            if (gn_tex) {
+                int tw, th; SDL_QueryTexture(gn_tex, nullptr, nullptr, &tw, &th);
+                double s = 110.0 / th * grade_pop;
+                SDL_Rect r = { cx - (int)(tw*s)/2 - 40, cur_y, (int)(tw*s), (int)(th*s) };
+                SDL_SetTextureAlphaMod(gn_tex, ga);
+                SDL_RenderCopy(renderer_, gn_tex, nullptr, &r);
+                SDL_SetTextureAlphaMod(gn_tex, 255);
+            } else {
+                font_.DrawText(renderer_, cx - 40, cur_y + 40, grade_key, {255, 255, 255, ga}, FontSize::GIANT, TextAlign::CENTER, grade_pop);
+            }
+
+            // EX Star Grade (per EX.md)
+            int stars = 0;
+            if (ex_acc >= 100.0) stars = 6;
+            else if (ex_acc >= 95.0) stars = 5;
+            else if (ex_acc >= 88.5) stars = 4;
+            else if (ex_acc >= 82.0) stars = 3;
+            else if (ex_acc >= 73.0) stars = 2;
+            else if (ex_acc >= 60.0) stars = 1;
+
+            if (stars > 0) {
+                SDL_Texture* ex_tex = ex_grade_textures_.count(stars) ? ex_grade_textures_[stars] : nullptr;
+                if (ex_tex) {
+                    int tw, th; SDL_QueryTexture(ex_tex, nullptr, nullptr, &tw, &th);
+                    double s = 60.0 / th * grade_pop;
+                    SDL_Rect r = { cx + 60, cur_y + 25, (int)(tw*s), (int)(th*s) };
+                    SDL_SetTextureAlphaMod(ex_tex, ga);
+                    SDL_RenderCopy(renderer_, ex_tex, nullptr, &r);
+                    SDL_SetTextureAlphaMod(ex_tex, 255);
+                }
+            }
+            cur_y += 110;
         }
     } else {
-        // Just rising accuracy
-        font_.DrawAccuracy(renderer_, left_x + 60, cur_y + 30, main_info.value, {255, 255, 255, 255}, TextAlign::LEFT, 0.7, main_info.is_percentage ? 4 : 2, true, true, {0,0,0,0}, FontSize::GIANT, FontSize::LARGE, 2, 5);
+        cur_y += 110;
     }
-    
-    cur_y += 110;
 
-    // --- SECONDARY DISPLAY (Small) ---
-    // Icon on Left, Score on Right (Same layout, smaller)
-    if (acc_progress > 0.3) {
-        if (sec_info.icon) {
-            int tw, th;
-            SDL_QueryTexture(sec_info.icon, nullptr, nullptr, &tw, &th);
-            double scale = 0.6; // Smaller
-            int dw = (int)(tw * scale);
-            int dh = (int)(th * scale);
-            SDL_Rect r = { left_x, cur_y, dw, dh };
-            SDL_RenderCopy(renderer_, sec_info.icon, nullptr, &r);
+    // 3. Accuracy & EX Score (Reveal @ 1.2s)
+    double score_t = t - 1.2;
+    if (score_t > 0) {
+        double score_progress = std::min(1.0, score_t / 1.5);
+        double eased_p = 1.0 - std::pow(1.0 - score_progress, 3.0);
+        uint8_t sa = static_cast<uint8_t>(255 * std::min(1.0, score_t / 0.3));
+
+        // Normal Accuracy
+        font_.DrawText(renderer_, cx - 100, cur_y, "ACCURACY (NORMAL)", {180, 180, 200, sa}, FontSize::SMALL, TextAlign::CENTER);
+        font_.DrawAccuracy(renderer_, cx - 100, cur_y + 25, normal_acc * eased_p, {255, 255, 255, sa}, TextAlign::CENTER, 0.7, 4, true, true, {0,0,0,0}, FontSize::HUGE);
+
+        // EX Accuracy
+        font_.DrawText(renderer_, cx + 110, cur_y, "ACCURACY (EX)", {220, 200, 180, sa}, FontSize::SMALL, TextAlign::CENTER);
+        font_.DrawAccuracy(renderer_, cx + 110, cur_y + 25, ex_acc * eased_p, {255, 220, 150, sa}, TextAlign::CENTER, 0.7, 2, true, true, {0,0,0,0}, FontSize::HUGE);
+    }
+    cur_y += 85;
+
+    // 4. Rating (Reveal @ 2.0s)
+    double rating_t = t - 2.0;
+    if (rating_t > 0) {
+        double r_alpha = std::min(1.0, rating_t / 0.5);
+        uint8_t ra = static_cast<uint8_t>(255 * r_alpha);
+        
+        // Use authoritative formula from Profile (pass normal_acc as percentage 0-101)
+        double rating = Profile::CalculateChartRating(ps.current_chart ? ps.current_chart->custom_difficulty : 0.0, normal_acc);
+        
+        font_.DrawText(renderer_, cx, cur_y, "EARNED RATING", {150, 200, 220, ra}, FontSize::SMALL, TextAlign::CENTER);
+        RenderRating(cx, cur_y + 22, rating * std::min(1.0, rating_t / 1.0), TextAlign::CENTER, p == 1);
+    }
+    cur_y += 75;
+
+    // 5. Judge Counters & Stats (Reveal @ 2.5s)
+    double stats_t = t - 2.5;
+    if (stats_t > 0) {
+        uint8_t row_a = static_cast<uint8_t>(255 * std::min(1.0, stats_t / 0.5));
+        
+        // Judgement List (Two columns inside panel)
+        const char* j_names[] = {"P-EXTRA", "P-CRIT", "PERFECT", "GREAT", "GOOD", "MISS"};
+        int j_indices[] = {static_cast<int>(Judgement::PEXTRA)-1, static_cast<int>(Judgement::PCRIT)-1, static_cast<int>(Judgement::PERFECT)-1, 
+                           static_cast<int>(Judgement::GREAT)-1, static_cast<int>(Judgement::GOOD)-1, static_cast<int>(Judgement::MISS)-1};
+        
+        int jy_start = cur_y;
+        for (int i = 0; i < 6; ++i) {
+            int ry = jy_start + i * 22;
+            int count = (j_indices[i] >= 0) ? ps.normal_judge_counts[j_indices[i]] : 0;
             
-            // Secondary Score (Outline=true, Bold=true, High-Res GIANT)
-            font_.DrawAccuracy(renderer_, left_x + dw + 20, cur_y + dh/2 - 10, sec_info.value, {200, 200, 255, 255}, TextAlign::LEFT, 0.5, sec_info.is_percentage ? 4 : 2, true, true, {0,0,0,0}, FontSize::GIANT, FontSize::LARGE, 2, 5);
-        } else {
-            font_.DrawText(renderer_, left_x + 30, cur_y + 10, sec_info.text_grade, sec_info.color, FontSize::MEDIUM, TextAlign::CENTER);
-            font_.DrawAccuracy(renderer_, left_x + 100, cur_y + 5, sec_info.value, {200, 200, 255, 255}, TextAlign::LEFT, 0.4, sec_info.is_percentage ? 4 : 2, true, true, {0,0,0,0}, FontSize::GIANT, FontSize::LARGE, 2, 5);
+            Color jc = GetJudgementColor(static_cast<Judgement>(j_indices[i]+1));
+            jc.a = row_a;
+            
+            font_.DrawText(renderer_, x + 60, ry, j_names[i], jc, FontSize::SMALL, TextAlign::LEFT);
+            font_.DrawText(renderer_, cx - 20, ry, std::to_string(count), {255, 255, 255, row_a}, FontSize::SMALL, TextAlign::RIGHT);
         }
-    } else {
-        font_.DrawAccuracy(renderer_, left_x + 100, cur_y + 5, sec_info.value, {200, 200, 255, 255}, TextAlign::LEFT, 0.4, sec_info.is_percentage ? 4 : 2, true, true, {0,0,0,0}, FontSize::GIANT, FontSize::LARGE, 2, 5);
-    }
 
-    
-    // --- Rating Reveal ---
-    if (current_chart_ && t > 1.2) {
-        // ... (Rating calculation same as before) ...
-        double diff = current_chart_->custom_difficulty;
-        double score_val = normal_acc * 10000.0; 
-        double bonus = 0.0;
-        if (score_val >= 1007500.0) bonus = 2.0 + (score_val - 1007500.0) * 0.0001;
-        else if (score_val >= 1005000.0) bonus = 1.5 + (score_val - 1005000.0) * 0.0002;
-        else if (score_val >= 1000000.0) bonus = 1.0 + (score_val - 1000000.0) * 0.0001;
-        else if (score_val >= 975000.0) bonus = (score_val - 975000.0) * 0.00004;
-        else bonus = (score_val - 975000.0) / 15000.0;
-        
-        double rating = std::max(0.0, diff + bonus);
-
-        // Animate rating rising as well?
-        double rating_progress = std::min(1.0, (t - 1.2) / 0.5);
-        double anim_rating = rating * rating_progress;
-
-        // Reformat rating: Label above, large numbers below
-        font_.DrawText(renderer_, right_x, cur_y + 60, "RATING", {150, 200, 200, 255}, FontSize::SMALL, TextAlign::RIGHT);
-
-        char rate_val_buf[16];
-        std::snprintf(rate_val_buf, sizeof(rate_val_buf), "%.2f", anim_rating);
-        std::string full_rate(rate_val_buf);
-        size_t dot_pos = full_rate.find('.');
-        if (dot_pos != std::string::npos) {
-            std::string int_part = full_rate.substr(0, dot_pos);
-            std::string dec_part = full_rate.substr(dot_pos);
-            
-            int digitW = font_.GetTextWidth("0", FontSize::HUGE, "score");
-            int int_w = static_cast<int>(int_part.length() * digitW);
-            
-            // Draw integer part (larger)
-            font_.DrawMonoText(renderer_, right_x - font_.GetTextWidth(dec_part, FontSize::LARGE, "score"), cur_y + 80, int_part, {80, 255, 255, 255}, FontSize::HUGE, TextAlign::RIGHT, 1.0, "score", -1, true, {0, 0, 0, 0}, 2, 5);
-            // Draw decimal part (smaller)
-            font_.DrawMonoText(renderer_, right_x, cur_y + 95, dec_part, {80, 255, 255, 255}, FontSize::LARGE, TextAlign::RIGHT, 1.0, "score", -1, true, {0, 0, 0, 0}, 1, 3);
-        } else {
-            font_.DrawMonoText(renderer_, right_x, cur_y + 80, full_rate, {80, 255, 255, 255}, FontSize::HUGE, TextAlign::RIGHT, 1.0, "score", -1, true, {0, 0, 0, 0}, 2, 5);
+        // Hold/Roll Judgements (Reveal @ 2.8s)
+        int hy_start = jy_start + 140;
+        const char* h_names[] = {"HOLD GOOD", "HOLD NG", "HOLD BAD"};
+        Color h_colors[] = {{100, 255, 100, row_a}, {255, 255, 100, row_a}, {255, 100, 100, row_a}};
+        for (int i = 0; i < 3; ++i) {
+            int ry = hy_start + i * 22;
+            int count = ps.hold_judgement_counts[i];
+            font_.DrawText(renderer_, x + 60, ry, h_names[i], h_colors[i], FontSize::SMALL, TextAlign::LEFT);
+            font_.DrawText(renderer_, cx - 20, ry, std::to_string(count), {255, 255, 255, row_a}, FontSize::SMALL, TextAlign::RIGHT);
         }
+
+        // Stats Column (Mean, StDev, Fast, Slow)
+        int sx = cx + 60;
+        int sy = jy_start;
+        char buf[64];
+        
+        auto drawStat = [&](int row, const char* label, const char* value, Color col = {200,200,220,255}) {
+            int ry = sy + row * 22;
+            font_.DrawText(renderer_, sx, ry, label, col, FontSize::SMALL, TextAlign::LEFT);
+            font_.DrawText(renderer_, x + w - 60, ry, value, {255,255,255,row_a}, FontSize::SMALL, TextAlign::RIGHT);
+        };
+
+        std::snprintf(buf, sizeof(buf), "%.2f ms", mean * 1000.0);
+        drawStat(0, "Mean Error", buf);
+        std::snprintf(buf, sizeof(buf), "%.2f ms", stddev * 1000.0);
+        drawStat(1, "Std Dev", buf);
+        
+        std::snprintf(buf, sizeof(buf), "%d", fast);
+        drawStat(3, "Fast", buf, {100, 200, 255, row_a});
+        std::snprintf(buf, sizeof(buf), "%d", slow);
+        drawStat(4, "Slow", buf, {255, 100, 100, row_a});
+
+        // Max Combo
+        std::snprintf(buf, sizeof(buf), "%d", ps.max_combo);
+        drawStat(5, "Max Combo", buf, {255, 255, 150, row_a});
     }
 
-    cur_y += 120; // Increased spacing to push stats down
-
-    // --- Judgement Stats (Staggered) ---
-    auto DrawStatRow = [&](const char* label, int count, Color c, int& ry, double delay) {
-        if (t < delay) return;
-        
-        double row_t = t - delay;
-        double row_progress = std::min(1.0, row_t / 0.3);
-        int anim_count = static_cast<int>(count * row_progress);
-        
-        font_.DrawText(renderer_, left_x, ry, label, c, FontSize::MEDIUM); // Bigger font
-        char buf[16]; std::snprintf(buf, sizeof(buf), "%d", anim_count);
-        font_.DrawText(renderer_, right_x, ry, buf, {255,255,255,255}, FontSize::MEDIUM, TextAlign::RIGHT);
-        ry += 32; // More vertical spacing for bigger font
-    };
-
-    int ry = cur_y;
-    double base_delay = 1.8;
-    double step = 0.1;
-
-    // Fix: Hide P-EXTRA if not in EX mode (index shifted if hidden)
-    if (results_ex_mode_) {
-        DrawStatRow("P-EXTRA", counts[0], GetJudgementColor(Judgement::PEXTRA), ry, base_delay);
-        base_delay += step;
+    // 6. Detailed Graph (Reveal @ 4.5s)
+    if (t > 4.5) {
+        RenderOffsetGraph(x + 30, y + h - 110, w - 60, 90, ps.hit_history);
     }
-    DrawStatRow("P-CRITICAL", counts[1], GetJudgementColor(Judgement::PCRIT), ry, base_delay); base_delay += step;
-    DrawStatRow("PERFECT", counts[2] + counts[3], GetJudgementColor(Judgement::PERFECT), ry, base_delay); base_delay += step;
-    DrawStatRow("GREAT", counts[4] + counts[5] + counts[6], GetJudgementColor(Judgement::GREAT), ry, base_delay); base_delay += step;
-    DrawStatRow("GOOD", counts[7], GetJudgementColor(Judgement::GOOD), ry, base_delay); base_delay += step;
-    DrawStatRow("MISS", counts[8], GetJudgementColor(Judgement::MISS), ry, base_delay); base_delay += step;
-
-    if (t > base_delay) {
-        ry += 15;
-        double mean = (valid_hits > 0) ? (error_sum / valid_hits) : 0.0;
-        double variance = (valid_hits > 0) ? (error_sq_sum / valid_hits) - (mean * mean) : 0.0;
-        double sd = (variance > 0.0) ? std::sqrt(variance) : 0.0;
-
-        char timing_buf[64];
-        std::snprintf(timing_buf, sizeof(timing_buf), "Mean: %.2fms  SD: %.2fms", mean * 1000.0, sd * 1000.0);
-        font_.DrawText(renderer_, left_x, ry, timing_buf, {180, 180, 200, 255}, FontSize::SMALL);
-        
-        ry += 30;
-        
-        // Early / Late with Colors & Spacing
-        char early_buf[32]; std::snprintf(early_buf, sizeof(early_buf), "Early: %d", fast_count);
-        char late_buf[32]; std::snprintf(late_buf, sizeof(late_buf), "Late: %d", slow_count);
-        
-        font_.DrawText(renderer_, left_x, ry, early_buf, {0, 255, 255, 255}, FontSize::SMALL); // Cyan
-        font_.DrawText(renderer_, right_x, ry, late_buf, {255, 100, 50, 255}, FontSize::SMALL, TextAlign::RIGHT); // Orange/Red
-    }
-
-    // --- Offset Graph (Bottom of panel) ---
-    if (t > base_delay + 0.5) {
-        int graph_h = 80;
-        int graph_y = y + h - graph_h - 10;
-        RenderOffsetGraph(left_x, graph_y, content_w, graph_h, ps.hit_history);
-    }
-
 }
 
 void GameWindow::RenderOffsetGraph(int x, int y, int w, int h, const std::vector<HitRecord>& hits) {
-    // 1. Background
-    DrawRect(x, y, w, h, {0, 0, 0, 100});
-    DrawRectOutline(x, y, w, h, {100, 100, 100, 255});
-
-    // 2. Center line (0ms)
-    // Y-Axis mapped: Top = -50ms (Early), Bottom = +50ms (Late)? 
-    // Wait, user asked for: Flip Y-axis so it goes early->late when going down.
-    // So Top=Early, Bottom=Late.
-    int cy = y + h/2; // 0ms line
-    DrawRect(x, cy, w, 1, {150, 150, 150, 255});
-
-    // 3. Limit lines (+/- 45ms roughly?)
-    // Let's say Graph Range is +/- 100ms
-    double GRAPH_RANGE = 0.100; 
-
-    // 4. Plot Dots
-    double duration = (song_duration_ > 0.0) ? song_duration_ : 1.0;
+    DrawRect(x, y, w, h, {0, 0, 0, 120});
+    DrawRectOutline(x, y, w, h, {100, 100, 120, 150});
+    
+    int cy = y + h / 2;
+    DrawRect(x, cy, w, 1, {255, 255, 255, 60}); // Center line
+    
+    double range = 0.100; // +/- 100ms
+    double duration = (hits.empty()) ? 1.0 : hits.back().time + 1.0;
 
     for (const auto& hit : hits) {
         if (hit.judge == Judgement::MISS) continue;
-
-        double nx = hit.time / duration;
-        if (nx < 0) nx = 0; if (nx > 1) nx = 1;
+        int dx = x + static_cast<int>((hit.time / duration) * w);
+        int dy = cy + static_cast<int>((hit.error / range) * (h / 2));
+        dy = std::clamp(dy, y + 2, y + h - 2);
         
-        // Error mapping: -0.1 -> Top, +0.1 -> Bottom
-        // cy is 0.
-        // y_offset = (error / range) * (h/2)
-        double y_offset = (hit.error / GRAPH_RANGE) * (h/2);
-        
-        // Clamp
-        if (y_offset < -h/2) y_offset = -h/2;
-        if (y_offset > h/2) y_offset = h/2;
-
-        int dot_x = x + static_cast<int>(nx * w);
-        int dot_y = cy + static_cast<int>(y_offset);
-
-        Color c = GetJudgementColor(hit.judge, results_ex_mode_);
-        
-        // Small 3x3 dot
-        SDL_Rect r = {dot_x-1, dot_y-1, 3, 3};
-        SDL_SetRenderDrawColor(renderer_, c.r, c.g, c.b, 255);
-        SDL_RenderFillRect(renderer_, &r);
+        Color c = GetJudgementColor(hit.judge, false);
+        DrawRect(dx - 1, dy - 1, 3, 3, c);
     }
 }
 
@@ -1861,9 +1814,10 @@ void GameWindow::RenderOffsetGraph(int x, int y, int w, int h, const std::vector
 // Hit Detection
 // ============================================================================
 
-void GameWindow::ProcessLaneHit(int lane, double forced_time, int p) {
+void GameWindow::ProcessLaneHit(int lane, double forced_time, int p, bool is_release) {
     if (p < 0 || p >= MAX_PLAYERS || !players_[p].joined) return;
     auto& ps = players_[p];
+    if (ps.failed_sequence) return; // Block hits after fail
     const NoteChart* chart = ps.current_chart;
     if (!chart || !playing_) return;
 
@@ -1891,6 +1845,10 @@ void GameWindow::ProcessLaneHit(int lane, double forced_time, int p) {
         NoteType nt = row.columns[static_cast<size_t>(lane)];
         if (!IsTap(nt)) continue;
 
+        // Lift Check: nt == Lift requires is_release, other Taps require !is_release
+        bool nt_is_lift = (nt == NoteType::Lift);
+        if (is_release != nt_is_lift) continue;
+
         double note_time = conductor_.BeatToTime(row.beat);
         double error = current_time - note_time;
         double abs_error = std::fabs(error);
@@ -1907,13 +1865,52 @@ void GameWindow::ProcessLaneHit(int lane, double forced_time, int p) {
     ps.note_hit_masks[best_idx] |= (1 << actual_lane);
     
     double abs_error_cur = std::fabs(best_error);
-    if (abs_error_cur < std::fabs(ps.row_best_error[best_idx]) || ps.row_best_error[best_idx] == 999.0f) {
+    // Chord Cohesion: worst hit determines the row's error
+    if (abs_error_cur > std::fabs(ps.row_best_error[best_idx]) || ps.row_best_error[best_idx] == 999.0f) {
         ps.row_best_error[best_idx] = static_cast<float>(best_error);
     }
 
     Judgement j_visual = sml::ClassifyHit(abs_error_cur, ex_mode_);
     ps.input.RecordHit(actual_lane, j_visual, best_error);
     ps.hit_history.push_back({current_time, best_error, j_visual, actual_lane, ex_mode_});
+
+    // Check for Hold/Roll head to start tracking
+    const auto& row = chart->note_rows[best_idx];
+    NoteType nt = row.columns[static_cast<size_t>(lane)];
+    if (nt == NoteType::HoldHead || nt == NoteType::RollHead) {
+        int tail_idx = row.tail_row_indices[actual_lane];
+        if (tail_idx >= 0) {
+            const auto& tail_row = chart->note_rows[tail_idx];
+            double start_t = conductor_.BeatToTime(row.beat);
+            double end_t = conductor_.BeatToTime(tail_row.beat);
+            
+            ActiveHold ah;
+            ah.row_index = best_idx;
+            ah.col_index = actual_lane;
+            ah.type = nt;
+            ah.start_time = start_t;
+            ah.end_time = end_t;
+            ah.total_duration = end_t - start_t;
+            ah.time_held = 0.0;
+            ah.current_release_time = 0.0;
+            ah.broken_continuity = false;
+            
+            if (nt == NoteType::RollHead) {
+                // One tick per beat correctly rounded
+                ah.required_ticks = static_cast<int>(std::ceil(tail_row.beat - row.beat));
+                if (ah.required_ticks < 1) ah.required_ticks = 1;
+                ah.ticks_hit = 0;
+            } else {
+                ah.required_ticks = 0;
+                ah.ticks_hit = 0;
+            }
+            
+            ah.start_beat = row.beat;
+            ah.last_autoplay_tick_beat = row.beat - 1.0; // Ensure first tick happens immediately if needed
+
+            ps.active_holds.push_back(ah);
+        }
+    }
 
     // Spawn hit flash
     double note_beat = chart->note_rows[best_idx].beat;
@@ -1988,43 +1985,50 @@ void GameWindow::ProcessLaneHit(int lane, double forced_time, int p) {
 // ============================================================================
 
 void GameWindow::ChangeScreen(ScreenState next) {
-    if (is_transitioning_) return;
-    next_screen_ = next;
+    if (screen_ == next || (is_transitioning_ && target_screen_ == next)) return;
+    
+    target_screen_ = next;
     is_transitioning_ = true;
-    transition_timer_ = 0.0;
+    screen_transition_timer_ = 0.0;
 }
 
 void GameWindow::Update(double dt) {
+    global_anim_timer_ += dt;
+
     // --- Screen Transition Update ---
     if (is_transitioning_) {
-        double prev_timer = transition_timer_;
-        transition_timer_ += dt;
-        double half_duration = transition_duration_ / 2.0;
+        double prev_timer = screen_transition_timer_;
+        screen_transition_timer_ += dt;
+        double duration = 0.8; // Total transition time
+        double half_duration = duration / 2.0;
 
-        // Peak of transition (perfectly black)
-        if (prev_timer < half_duration && transition_timer_ >= half_duration) {
+        if (prev_timer < half_duration && screen_transition_timer_ >= half_duration) {
             ScreenState old_screen = screen_;
-            screen_ = next_screen_;
+            screen_ = target_screen_;
             
-            // Special initialization logic when entering screens
             if (screen_ == ScreenState::RESULTS) {
-                ShowResults(); // Populate stats
+                // Initialize results strings once
+                if (active_simfile_) results_title_ = active_simfile_->title;
+                if (current_chart_) {
+                    std::string mode_name = GetChartModeName(current_chart_->chart_type);
+                    results_chart_info_ = mode_name + " " + current_chart_->difficulty_name;
+                }
                 results_reveal_timer_ = 0.0;
-            } else if (screen_ == ScreenState::SONG_SELECT) {
-                ReturnToSongSelect();
-                playing_ = false;
+            }
+            
+            // Fix: Stop music when leaving gameplay
+            if (old_screen == ScreenState::GAMEPLAY && screen_ == ScreenState::SONG_SELECT) {
                 audio_.Stop();
-            } else if (screen_ == ScreenState::CALIBRATION) {
-                // When coming back from Gameplay Calibration
+                audio_.UnloadMusic();
+                audio_loaded_ = false;
                 playing_ = false;
-                audio_.Stop();
-                is_calibrating_ = false;
+                video_path_ = "";
             }
         }
 
-        if (transition_timer_ >= transition_duration_) {
+        if (screen_transition_timer_ >= duration) {
             is_transitioning_ = false;
-            transition_timer_ = 0.0;
+            screen_transition_timer_ = 0.0;
         }
     }
 
@@ -2080,11 +2084,11 @@ void GameWindow::Update(double dt) {
                     play_time_ += dt;
                 }
             } else {
-                play_time_ += dt;
+                play_time_ += dt * time_scale_;
             }
         } else {
             // Even when not playing music (lead-in), we must advance time for the notefield
-            play_time_ += dt;
+            play_time_ += dt * time_scale_;
 
             // Trigger music start if we hit 0.0
             if (play_time_ >= 0.0 && !playing_) {
@@ -2095,7 +2099,32 @@ void GameWindow::Update(double dt) {
                  playing_ = true;
             }
         }
+        
         conductor_.Update(play_time_);
+
+        // Calculate relative video playback time
+        double bga_time = 0.0;
+        double current_beat = conductor_.GetCurrentBeat();
+        
+        if (active_simfile_ && !active_simfile_->bg_changes.empty()) {
+            const BGEvent* best_ev = nullptr;
+            for (const auto& ev : active_simfile_->bg_changes) {
+                if (ev.beat <= current_beat) {
+                    best_ev = &ev;
+                } else {
+                    break;
+                }
+            }
+            if (best_ev) {
+                double ev_start_time = conductor_.BeatToTime(best_ev->beat);
+                bga_time = play_time_ - ev_start_time;
+            }
+        } else if (!auto_bga_file_.empty() && current_beat >= 0.0) {
+            // Auto-discovered BGAs default to 0.0s of the audio track
+            bga_time = play_time_ - audio_offset_;
+        }
+        
+        video_decoder_.Update(bga_time);
         input_.Update(dt);
         // Update per-player InputMappers (flash decay)
         for (int p = 0; p < MAX_PLAYERS; ++p) {
@@ -2126,24 +2155,108 @@ void GameWindow::Update(double dt) {
             if (grade_popup_timer_ < 0.0) grade_popup_timer_ = 0.0;
         }
 
-        // Update per-player timers
+        // Update per-player timers and hit flashes
         for (int p = 0; p < MAX_PLAYERS; ++p) {
             if (players_[p].joined) {
                 auto& ps = players_[p];
                 if (ps.judgement_timer > 0.0) ps.judgement_timer = std::max(0.0, ps.judgement_timer - dt);
                 if (ps.combo_pop_timer > 0.0) ps.combo_pop_timer = std::max(0.0, ps.combo_pop_timer - dt);
                 if (ps.grade_popup_timer > 0.0) ps.grade_popup_timer = std::max(0.0, ps.grade_popup_timer - dt);
+                if (ps.score_anim_timer > 0.0) ps.score_anim_timer = std::max(0.0, ps.score_anim_timer - dt);
+
+                // Update hit flash timers
+                for (auto& hf : ps.hit_flashes) {
+                    hf.timer -= dt;
+                }
+                ps.hit_flashes.erase(
+                    std::remove_if(ps.hit_flashes.begin(), ps.hit_flashes.end(),
+                        [](const HitFlash& hf) { return hf.timer <= 0.0; }),
+                    ps.hit_flashes.end());
+
+                // 3. Update active holds/rolls
+                double current_beat = conductor_.GetCurrentBeat();
+
+                for (auto it = ps.active_holds.begin(); it != ps.active_holds.end(); ) {
+                    auto& ah = *it;
+                    bool is_held = ps.input.GetLaneState(ah.col_index).pressed;
+                    
+                    // Autoplay Override
+                    if (autoplay_) {
+                        if (ah.type == NoteType::HoldHead) {
+                            is_held = true;
+                        } else if (ah.type == NoteType::RollHead) {
+                            // Automatically tick rolls based on beat progression
+                            // Tick every integer beat relative to start
+                            // Simple logic: if we crossed a beat boundary since last tick
+                            if (current_beat >= ah.last_autoplay_tick_beat + 1.0) {
+                                ah.ticks_hit++;
+                                ah.last_autoplay_tick_beat += 1.0;
+                                // Catch up (if low FPS or big jump)
+                                while (current_beat >= ah.last_autoplay_tick_beat + 1.0) {
+                                     ah.ticks_hit++;
+                                     ah.last_autoplay_tick_beat += 1.0;
+                                }
+                            }
+                        }
+                    }
+
+                    if (ah.type == NoteType::HoldHead) {
+                        if (is_held) {
+                            ah.time_held += dt;
+                            ah.current_release_time = 0.0;
+                        } else {
+                            ah.current_release_time += dt;
+                            if (ah.current_release_time > 0.250) ah.broken_continuity = true;
+                        }
+                    } else if (ah.type == NoteType::RollHead) {
+                        if (!autoplay_ && ps.input.GetLaneState(ah.col_index).just_pressed) {
+                            ah.ticks_hit++;
+                        }
+                    }
+
+                    // Check for end of hold/roll
+                    if (play_time_ >= ah.end_time) {
+                        int grade = 2; // Default Bad
+                        if (ah.type == NoteType::HoldHead) {
+                            double held_pct = ah.time_held / ah.total_duration;
+                            if (held_pct > 0.8 && !ah.broken_continuity) grade = 0; // Good
+                            else if (held_pct > 0.4) grade = 1; // NG
+                        } else {
+                            double roll_pct = static_cast<double>(ah.ticks_hit) / ah.required_ticks;
+                            if (roll_pct >= 1.0) grade = 0; // Good
+                            else if (roll_pct > 0.5) grade = 1; // NG
+                        }
+                        
+                        ps.hold_judgement_counts[grade]++;
+                        ps.life_meter.OnHoldResult(grade);
+
+                        // Spawn visual indicator
+                        ps.hold_indicators.push_back({ah.col_index, grade, 0.6});
+
+                        // Update Clear Type (cap it)
+                        if (grade == 2) { // Bad
+                            if (ps.clear_type > ClearType::CLEAR) ps.clear_type = ClearType::CLEAR;
+                        } else if (grade == 1) { // NG
+                            if (ps.clear_type > ClearType::FULL_COMBO) ps.clear_type = ClearType::FULL_COMBO;
+                        }
+
+                        it = ps.active_holds.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+
+                // 4. Update hold indicators
+                for (auto it = ps.hold_indicators.begin(); it != ps.hold_indicators.end(); ) {
+                    it->timer -= dt;
+                    if (it->timer <= 0.0) {
+                        it = ps.hold_indicators.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
             }
         }
-
-        // Update hit flash timers
-        for (auto& hf : hit_flashes_) {
-            hf.timer -= dt;
-        }
-        hit_flashes_.erase(
-            std::remove_if(hit_flashes_.begin(), hit_flashes_.end(),
-                [](const HitFlash& hf) { return hf.timer <= 0.0; }),
-            hit_flashes_.end());
 
         // Auto-miss & Per-Player Gameplay Update
         for (int p = 0; p < MAX_PLAYERS; ++p) {
@@ -2153,56 +2266,82 @@ void GameWindow::Update(double dt) {
             if (!chart) continue;
 
             // 1. Autoplay Logic
-            if (autoplay_ && playing_) {
+            if (autoplay_ && playing_ && !ps.failed_sequence) {
                 while (ps.next_hittable_note < chart->note_rows.size()) {
-                    const auto& row = chart->note_rows[ps.next_hittable_note];
+                    size_t idx = ps.next_hittable_note;
+                    const auto& row = chart->note_rows[idx];
                     double note_time = conductor_.BeatToTime(row.beat);
                     if (play_time_ >= note_time) {
                         for (int col = 0; col < static_cast<int>(row.columns.size()); ++col) {
-                            if (IsTap(row.columns[col]) && !(ps.note_hit_masks[ps.next_hittable_note] & (1 << col))) {
-                                ProcessLaneHit(col, note_time, p);
+                            NoteType nt = row.columns[col];
+                            if (IsTap(nt) && !(ps.note_hit_masks[idx] & (1 << col))) {
+                                ProcessLaneHit(col, note_time, p, (nt == NoteType::Lift));
                             }
                         }
-                        // Pointer is advanced by the while loop below
+                        // If ProcessLaneHit didn't advance past this row
+                        // (e.g. row had only mines/holds), advance manually
+                        if (ps.next_hittable_note == idx) {
+                            ps.next_hittable_note++;
+                        }
                     } else break;
                 }
             }
 
             // 2. Miss Detection
-            while (ps.next_hittable_note < chart->note_rows.size()) {
-                const auto& row = chart->note_rows[ps.next_hittable_note];
-                double note_time = conductor_.BeatToTime(row.beat);
-                double error = play_time_ - note_time;
-                double max_window = ex_mode_ ? JudgeWindowsEX::MISS : JudgeWindows::GOOD;
-
-                if (error > max_window) {
-                    bool fully_hit = IsRowFullyHit(ps.next_hittable_note, p);
-                    if (!fully_hit) {
-                        int hittable_count = GetRowHittableCount(ps.next_hittable_note);
-                        ps.combo = 0;
-                        UpdateScores(999.0, hittable_count, p);
-                        ps.hit_history.push_back({note_time, 999.0, Judgement::MISS, -1, ex_mode_});
-                        ps.last_judgement = Judgement::MISS;
-                        ps.judgement_timer = 0.6;
-                        if (ps.clear_type > ClearType::CLEAR) ps.clear_type = ClearType::CLEAR;
+            if (!ps.failed_sequence) {
+                while (ps.next_hittable_note < chart->note_rows.size()) {
+                    // Skip rows with no tappable notes (mines, hold tails, etc.)
+                    if (GetRowRequiredMask(ps.next_hittable_note) == 0) {
+                        ps.next_hittable_note++;
+                        continue;
                     }
-                    ps.next_hittable_note++;
-                } else break;
+
+                    const auto& row = chart->note_rows[ps.next_hittable_note];
+                    double note_time = conductor_.BeatToTime(row.beat);
+                    double error = play_time_ - note_time;
+                    double max_window = ex_mode_ ? JudgeWindowsEX::MISS : JudgeWindows::GOOD;
+
+                    if (error > max_window) {
+                        bool fully_hit = IsRowFullyHit(ps.next_hittable_note, p);
+                        if (!fully_hit) {
+                            int hittable_count = GetRowHittableCount(ps.next_hittable_note);
+                            ps.combo = 0;
+                            UpdateScores(999.0, hittable_count, p);
+                            ps.hit_history.push_back({note_time, 999.0, Judgement::MISS, -1, ex_mode_});
+                            ps.last_judgement = Judgement::MISS;
+                            ps.judgement_timer = 0.6;
+
+                            // Spawn "Bad" indicator for missed hold/roll heads
+                            for (int col = 0; col < static_cast<int>(row.columns.size()); ++col) {
+                                NoteType nt = row.columns[col];
+                                if (nt == NoteType::HoldHead || nt == NoteType::RollHead) {
+                                    ps.hold_indicators.push_back({col, 2, 0.6}); // 2 = Bad
+                                }
+                            }
+
+                            if (ps.clear_type > ClearType::CLEAR) ps.clear_type = ClearType::CLEAR;
+                        }
+                        ps.next_hittable_note++;
+                    } else break;
+                }
             }
 
-            // 3. Mine Detection
+            // 3. Mine Detection (Rising-edge only: tap within 75ms window)
             double current_beat = conductor_.GetCurrentBeat();
+            constexpr double MINE_WINDOW = 0.075; // 75ms one-sided
             size_t m_start = (ps.next_hittable_note > 20) ? ps.next_hittable_note - 20 : 0;
             size_t m_end = std::min(chart->note_rows.size(), ps.next_hittable_note + 50);
 
             for (size_t i = m_start; i < m_end; ++i) {
                 const auto& row = chart->note_rows[i];
-                if (row.beat > current_beat + 0.5) break;
-                if (row.beat < current_beat - 0.2) continue;
+                double mine_time = conductor_.BeatToTime(row.beat);
+                double time_diff = play_time_ - mine_time;
+                if (time_diff > MINE_WINDOW) continue;   // Mine already passed window
+                if (time_diff < -MINE_WINDOW) break;      // Mine not yet in window
 
                 for (int col = 0; col < static_cast<int>(row.columns.size()); ++col) {
-                    if (row.columns[col] == NoteType::Mine && !(ps.note_hit_masks[i] & (1 << col))) {
-                        if (ps.input.GetLaneState(col).pressed) {
+                    if (row.columns[col] == NoteType::Mine && !(ps.note_hit_masks[i] & (1 << col)) && !ps.failed_sequence) {
+                        if (ps.input.GetLaneState(col).just_pressed) {
                             ps.note_hit_masks[i] |= (1 << col);
                             ps.life_meter.OnMineHit();
                             if (p == active_player_idx_) life_meter_.OnMineHit();
@@ -2219,29 +2358,175 @@ void GameWindow::Update(double dt) {
                 ps.results_delay = (ps.clear_type >= ClearType::FULL_COMBO) ? 4.5 : 1.5;
             }
 
-            if (ps.chart_finished && !ps.failed_sequence) {
-                if (is_calibrating_) {
-                    StartGameplayDirect();
-                    audio_.Play(0.0);
-                    playing_ = true;
-                } else {
-                    ps.results_delay -= dt;
-                    if (ps.results_delay <= 0.0) {
-                        bool all_finished = true;
-                        for (int i=0; i<MAX_PLAYERS; ++i) {
-                            if (players_[i].joined && !players_[i].chart_finished) all_finished = false;
+            if (ps.failed_sequence) {
+                ps.fail_animation_timer += dt;
+            }
+
+            // --- Life Gauge Animations ---
+            LifeType type = ps.life_meter.GetType();
+            
+            double intro_progress = 1.0;
+            if (ready_animation_timer_ > 0.0) {
+                intro_progress = std::clamp((2.0 - ready_animation_timer_) / 1.0, 0.0, 1.0);
+            }
+            float target_life = ps.life_meter.GetLife() * static_cast<float>(intro_progress);
+
+            if (ps.displayed_life > target_life) {
+                ps.displayed_life = std::max(target_life, static_cast<float>(ps.displayed_life - dt * 0.5));
+            } else {
+                ps.displayed_life = target_life;
+            }
+
+            if (type == LifeType::STANDARD) {
+                int active_segs = static_cast<int>(std::ceil(target_life * 20));
+                if (active_segs > ps.last_active_segments) {
+                    for (int i = ps.last_active_segments; i < active_segs && i < 20; ++i) ps.segment_flash_timers[i] = 1.0;
+                } else if (active_segs < ps.last_active_segments) {
+                    for (int i = active_segs; i < ps.last_active_segments && i < 20; ++i) ps.segment_flash_timers[i] = -1.0;
+                }
+                ps.last_active_segments = active_segs;
+                for (int i = 0; i < 20; ++i) {
+                    if (ps.segment_flash_timers[i] > 0.0) ps.segment_flash_timers[i] = std::max(0.0, ps.segment_flash_timers[i] - dt * 3.0);
+                    else if (ps.segment_flash_timers[i] < 0.0) ps.segment_flash_timers[i] = std::min(0.0, ps.segment_flash_timers[i] + dt * 3.0);
+                }
+            } else if (type == LifeType::LIFE4 || type == LifeType::RISKY) {
+                int total_batt = (type == LifeType::LIFE4) ? 4 : 1;
+                int active_batt = static_cast<int>(std::ceil((target_life / std::max(0.01f, ps.life_meter.GetLife())) * ps.life_meter.GetBatteryLives()));
+                if (intro_progress >= 1.0) active_batt = ps.life_meter.GetBatteryLives(); // ensure it syncs exactly after intro
+                
+                if (active_batt < ps.last_battery_lives) {
+                    for (int i = active_batt; i < ps.last_battery_lives && i < 4; ++i) ps.battery_flash_timers[i] = 1.0;
+                } else if (active_batt > ps.last_battery_lives) {
+                    for (int i = ps.last_battery_lives; i < active_batt && i < 4; ++i) ps.battery_flash_timers[i] = -1.0;
+                }
+                ps.last_battery_lives = active_batt;
+                for (int i = 0; i < 4; ++i) {
+                    if (ps.battery_flash_timers[i] > 0.0) ps.battery_flash_timers[i] = std::max(0.0, ps.battery_flash_timers[i] - dt * 2.0);
+                    else if (ps.battery_flash_timers[i] < 0.0) ps.battery_flash_timers[i] = std::min(0.0, ps.battery_flash_timers[i] + dt * 2.0);
+                }
+            } else if (type == LifeType::FLARE) {
+                if (target_life < ps.last_flare_life && intro_progress >= 1.0) {
+                    ps.flare_flash_timer = 1.0;
+                }
+                ps.last_flare_life = target_life;
+                if (ps.flare_flash_timer > 0.0) ps.flare_flash_timer = std::max(0.0, ps.flare_flash_timer - dt * 4.0);
+            }
+
+            // --- RISKY Shatter State Machine ---
+            if (type == LifeType::RISKY && ps.shatter_state != ShatterState::NONE) {
+                ps.shatter_timer += dt;
+
+                if (ps.shatter_state == ShatterState::CRACKING) {
+                    // Check if we should transition to SHATTERING
+                    bool all_players_failed = true;
+                    for (int j = 0; j < MAX_PLAYERS; ++j) {
+                        if (players_[j].joined && !players_[j].failed_sequence) {
+                            all_players_failed = false;
+                            break;
                         }
-                        if (all_finished) ChangeScreen(ScreenState::RESULTS);
+                    }
+
+                    bool should_shatter = false;
+                    if (all_players_failed) {
+                        // All dead: shatter after 1.5s of cracking
+                        if (ps.shatter_timer >= 1.5) should_shatter = true;
+                    } else {
+                        // Other player alive: check if they also use RISKY and are alive
+                        bool other_risky_alive = false;
+                        for (int j = 0; j < MAX_PLAYERS; ++j) {
+                            if (j == p || !players_[j].joined) continue;
+                            if (players_[j].life_meter.GetType() == LifeType::RISKY && !players_[j].failed_sequence) {
+                                other_risky_alive = true;
+                            }
+                        }
+                        if (other_risky_alive) {
+                            // Wait indefinitely (other RISKY player still alive)
+                        } else {
+                            // Other player is non-RISKY or non-existent: shatter independently after 1.5s
+                            if (ps.shatter_timer >= 1.5) should_shatter = true;
+                        }
+                    }
+
+                    if (should_shatter) {
+                        ps.shatter_state = ShatterState::SHATTERING;
+                        ps.shatter_timer = 0.0;
+
+                        // Spawn particles from the gauge slot position
+                        int bar_w_est = 22;
+                        int bar_x_est = (p == 0) ? 4 : (width_ - bar_w_est - 4);
+                        int bar_y_est = 80;
+                        int bar_h_est = height_ - 160;
+                        for (int k = 0; k < 18; ++k) {
+                            ShatterParticle sp;
+                            sp.x = static_cast<float>(bar_x_est + (std::rand() % bar_w_est));
+                            sp.y = static_cast<float>(bar_y_est + (std::rand() % bar_h_est));
+                            sp.vx = static_cast<float>((std::rand() % 200) - 100);
+                            sp.vy = static_cast<float>((std::rand() % 150) - 120);
+                            sp.rot = 0.0f;
+                            sp.rot_v = static_cast<float>((std::rand() % 600) - 300) * 0.01f;
+                            sp.w = static_cast<float>(4 + (std::rand() % 8));
+                            sp.h = static_cast<float>(3 + (std::rand() % 6));
+                            double pulse = 0.5 + 0.5 * std::sin(play_time_ * 6.0);
+                            uint8_t wb = static_cast<uint8_t>(180 + 75 * pulse);
+                            sp.c = {wb, wb, wb, 255};
+                            sp.alpha = 255.0f;
+                            ps.shatter_particles.push_back(sp);
+                        }
+
+                        // Stop audio if all players are now failed
+                        if (all_players_failed) {
+                            audio_.Stop();
+                        }
+                    }
+                }
+
+                // Update shatter particles physics
+                if (ps.shatter_state == ShatterState::SHATTERING) {
+                    for (auto& sp : ps.shatter_particles) {
+                        sp.vy += static_cast<float>(dt * 400.0); // gravity
+                        sp.x += sp.vx * static_cast<float>(dt);
+                        sp.y += sp.vy * static_cast<float>(dt);
+                        sp.rot += sp.rot_v * static_cast<float>(dt);
+                        sp.alpha -= static_cast<float>(dt * 180.0); // fade over ~1.4s
                     }
                 }
             }
+        }
 
-            if (ps.failed_sequence) {
-                ps.fail_animation_timer += dt;
-                if (ps.fail_animation_timer >= 2.0) {
-                    ChangeScreen(ScreenState::RESULTS);
-                }
+        // Unified End-of-Game Detection
+        bool all_done = true;
+        bool any_alive = false;
+        int active_count = 0;
+        for (int i = 0; i < MAX_PLAYERS; ++i) {
+            if (!players_[i].joined) continue;
+            active_count++;
+            
+            bool player_done = false;
+            if (players_[i].chart_finished && players_[i].results_delay <= 0.0) player_done = true;
+            // RISKY players need longer for the shatter sequence
+            double fail_threshold = 2.0;
+            if (players_[i].life_meter.GetType() == LifeType::RISKY) fail_threshold = 4.0;
+            if (players_[i].failed_sequence && players_[i].fail_animation_timer >= fail_threshold) player_done = true;
+            
+            if (!player_done) all_done = false;
+            if (!players_[i].failed_sequence) any_alive = true;
+
+            // Staggered results delay update
+            if (players_[i].chart_finished && !players_[i].failed_sequence) {
+                players_[i].results_delay -= dt;
             }
+        }
+
+        // Gradual time_scale_ deceleration when all players have failed
+        if (!any_alive && time_scale_ > 0.0) {
+            time_scale_ = std::max(0.0, time_scale_ - dt * 2.0); // halt over ~0.5s
+        }
+
+        if (active_count > 0 && all_done) {
+            if (!any_alive) {
+                audio_.Stop(); // Everyone failed
+            }
+            ChangeScreen(ScreenState::RESULTS);
         }
     } else if (screen_ == ScreenState::RESULTS) {
         results_reveal_timer_ += dt;
@@ -2266,32 +2551,27 @@ void GameWindow::Render() {
     if (screen_ == ScreenState::OPTIONS)     RenderOptions();
     if (screen_ == ScreenState::CALIBRATION) RenderCalibration();
 
-    if (showing_modifier_menu_) {
-        RenderModifierMenu();
-    }
-
     // Polish transitions
+
+    // --- Player-specific Mod Menus (Topmost global layer) ---
+    for (int p = 0; p < MAX_PLAYERS; ++p) {
+        if (players_[p].joined) RenderModifierMenu(p);
+    }
 
     // --- Screen Transition Overlay ---
     if (is_transitioning_) {
+        double duration = 0.8;
+        double half_duration = duration / 2.0;
         double alpha_factor = 0.0;
-        double half_duration = transition_duration_ / 2.0;
 
-        if (transition_timer_ < half_duration) {
-            // Fading OUT (to black)
-            alpha_factor = transition_timer_ / half_duration;
+        if (screen_transition_timer_ < half_duration) {
+            alpha_factor = screen_transition_timer_ / half_duration;
         } else {
-            // Fading IN (from black)
-            alpha_factor = 1.0 - ((transition_timer_ - half_duration) / half_duration);
+            alpha_factor = 1.0 - ((screen_transition_timer_ - half_duration) / half_duration);
         }
 
-        int alpha = static_cast<int>(255 * alpha_factor);
-        if (alpha > 0) {
-            SDL_Rect screen_rect = { 0, 0, width_, height_ };
-            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, alpha);
-            SDL_RenderFillRect(renderer_, &screen_rect);
-        }
+        int alpha = static_cast<int>(255 * std::min(1.0, alpha_factor));
+        DrawRect(0, 0, width_, height_, {0, 0, 0, static_cast<uint8_t>(alpha)});
     }
 
     SDL_RenderPresent(renderer_);
@@ -2425,39 +2705,23 @@ void GameWindow::UpdateProfileLoad(double dt) {
 }
 
 void GameWindow::RenderAttraction() {
-    // Dark blue/purple gradient background
-    DrawRect(0, 0, width_, height_, {8, 8, 24, 255});
+    // 1. Sliding Background / Logo
+    double entrance = std::min(1.0, global_anim_timer_ / 1.5);
+    double slide = 1.0 - std::pow(1.0 - entrance, 3.0);
+    int logo_y = static_cast<int>(height_ / 2 - 100 + (1.0 - slide) * 50);
+
+    // Vignette background
+    DrawRect(0, 0, width_, height_, {10, 10, 20, 255});
     
-    // Pulsing overlay
-    double pulse = 0.5 + 0.5 * std::sin(attraction_timer_ * 1.5);
-    int overlay_alpha = static_cast<int>(20 * pulse);
-    DrawRect(0, 0, width_, height_, {60, 40, 120, static_cast<uint8_t>(overlay_alpha)});
-
-    // Title
-    int center_x = width_ / 2;
-    int title_y = height_ / 3;
-    font_.DrawText(renderer_, center_x, title_y, "SM-LEGENDS",
-        {255, 255, 255, 255}, FontSize::GIANT, TextAlign::CENTER);
-
-    // Subtitle
-    font_.DrawText(renderer_, center_x, title_y + 80, "STEP MANIA LEGENDS",
-        {180, 180, 200, 200}, FontSize::LARGE, TextAlign::CENTER);
-
-    // "Press Start" with pulsing alpha
-    uint8_t press_alpha = static_cast<uint8_t>(120 + 135 * pulse);
-    int press_y = height_ * 2 / 3;
-    font_.DrawText(renderer_, center_x, press_y, "PRESS START",
-        {255, 220, 100, press_alpha}, FontSize::TITLE, TextAlign::CENTER);
-
-    // USB hint
-    font_.DrawText(renderer_, center_x, press_y + 50,
-        "or insert USB drive",
-        {120, 120, 140, 180}, FontSize::SMALL, TextAlign::CENTER);
-
-    // Version / Credits at bottom
-    font_.DrawText(renderer_, center_x, height_ - 40,
-        "v0.1 // SM-Legends",
-        {80, 80, 100, 150}, FontSize::SMALL, TextAlign::CENTER);
+    // Pulsing "Press Start"
+    double pulse = 0.5 + 0.5 * std::sin(global_anim_timer_ * 4.0);
+    uint8_t alpha = static_cast<uint8_t>(150 + 105 * pulse);
+    
+    font_.DrawText(renderer_, width_ / 2, logo_y, "SM LEGENDS", {255, 255, 255, static_cast<uint8_t>(255 * entrance)}, FontSize::TITLE, TextAlign::CENTER);
+    font_.DrawText(renderer_, width_ / 2, height_ / 2 + 100, "PRESS START / [ENTER] TO PLAY", {200, 200, 255, alpha}, FontSize::MEDIUM, TextAlign::CENTER);
+    
+    // Bottom info
+    font_.DrawText(renderer_, width_ / 2, height_ - 40, "© 2026 ANTIGRAVITY - ADVANCED AGENTIC CODING", {100, 100, 120, 255}, FontSize::SMALL, TextAlign::CENTER);
 }
 
 void GameWindow::RenderProfileLoad() {
@@ -2552,6 +2816,7 @@ void GameWindow::JoinPlayer(int player_idx) {
 
     players_[player_idx].joined = true;
     players_[player_idx].profile.Reset();
+    ApplyProfileMods(player_idx); // Apply default mods to the player state
     profile_load_state_[player_idx] = ProfileLoadState{};
 
     num_active_players_ = 0;
@@ -2648,40 +2913,78 @@ void GameWindow::ScanLocalProfiles() {
     local_profile_names_ = Profile::ScanLocalProfiles("profiles");
 }
 
-void GameWindow::SaveActiveProfile(int player_idx) {
-    if (player_idx < 0 || player_idx >= MAX_PLAYERS) return;
-    auto& prof = players_[player_idx].profile;
+void GameWindow::SaveActiveProfile(int p) {
+    if (p < 0 || p >= MAX_PLAYERS) return;
+    auto& ps = players_[p];
+    auto& prof = ps.profile;
     if (prof.is_guest || prof.source_path.empty()) return;
 
-    // Sync current mods into profile before saving
-    prof.speed_mod    = field_config_.speed_mod;
-    prof.mod_type     = static_cast<int>(field_config_.mod_type);
-    prof.downscroll   = field_config_.downscroll;
-    prof.audio_offset = audio_offset_;
-    prof.noteskin     = (noteskin_index_ < static_cast<int>(available_noteskins_.size()))
-                          ? available_noteskins_[noteskin_index_] : "Default";
-    prof.effect_mode  = effect_mode_;
+    // Sync current per-player mods into profile before saving
+    prof.speed_mod    = ps.field_config.speed_mod;
+    prof.mod_type     = static_cast<int>(ps.field_config.mod_type);
+    prof.downscroll   = ps.field_config.downscroll;
+    
+    // Global sync for legacy (if player is primary)
+    if (p == active_player_idx_) {
+        prof.audio_offset = audio_offset_;
+    }
+
+    prof.noteskin     = (ps.noteskin_index < static_cast<int>(available_noteskins_.size()))
+                          ? available_noteskins_[ps.noteskin_index] : "Default";
+    prof.effect_mode  = ps.effect_mode;
+    
+    // New fields
+    prof.sudden_plus  = ps.sudden_plus_val;
+    prof.hidden_plus  = ps.hidden_plus_val;
+    prof.combo_display_mode = static_cast<int>(ps.combo_display_mode);
+    prof.bga_brightness = static_cast<int>(ps.bga_brightness);
+    prof.ex_mode      = ps.ex_mode;
+    
+    // Sync life mode/flare
+    prof.life_type    = static_cast<int>(ps.life_meter.GetType());
+    prof.flare_level  = ps.life_meter.GetFlareLevel();
 
     prof.Save(prof.source_path);
 }
 
-void GameWindow::ApplyProfileMods(int player_idx) {
-    if (player_idx < 0 || player_idx >= MAX_PLAYERS) return;
-    auto& prof = players_[player_idx].profile;
+void GameWindow::ApplyProfileMods(int p) {
+    if (p < 0 || p >= MAX_PLAYERS) return;
+    auto& ps = players_[p];
+    auto& prof = ps.profile;
     
-    // 1. Sync per-player field config with profile settings (guest or registered)
-    auto& cfg = players_[player_idx].field_config;
-    cfg.speed_mod = prof.speed_mod;
-    cfg.mod_type  = static_cast<ScrollModType>(prof.mod_type);
-    cfg.downscroll = prof.downscroll;
-    // Calculate receptor_y for this player
-    cfg.receptor_y = cfg.downscroll ? height_ * 0.85 : height_ * 0.15;
+    // 1. Restore per-player field config
+    ps.field_config.speed_mod = prof.speed_mod;
+    ps.field_config.mod_type  = static_cast<ScrollModType>(prof.mod_type);
+    ps.field_config.downscroll = prof.downscroll;
+    ps.field_config.receptor_y = ps.field_config.downscroll ? height_ * 0.85 : height_ * 0.15;
 
-    // 2. Also sync global field_config_ if this is the primary player slot being used for setup
-    if (player_idx == active_player_idx_) {
-        field_config_ = cfg;
+    // 2. Restore other modifiers
+    ps.sudden_plus_val = prof.sudden_plus;
+    ps.hidden_plus_val = prof.hidden_plus;
+    ps.effect_mode     = prof.effect_mode;
+    ps.ex_mode         = prof.ex_mode;
+    ps.combo_display_mode = static_cast<ComboDisplayMode>(prof.combo_display_mode);
+    ps.bga_brightness  = static_cast<BGABrightness>(prof.bga_brightness);
+    
+    // Life Mode
+    ps.life_meter.Init(static_cast<LifeType>(prof.life_type), prof.flare_level);
+
+    // Noteskin (scan for index)
+    if (!prof.noteskin.empty()) {
+        for (int i = 0; i < (int)available_noteskins_.size(); ++i) {
+            if (available_noteskins_[i] == prof.noteskin) {
+                ps.noteskin_index = i;
+                break;
+            }
+        }
+    }
+
+    // 3. Sync global variables ONLY if this is the active player (for menu display/legacy)
+    if (p == active_player_idx_) {
+        field_config_ = ps.field_config;
         audio_offset_ = prof.audio_offset;
         effect_mode_  = prof.effect_mode;
+        ex_mode_      = prof.ex_mode;
         if (!prof.noteskin.empty()) {
             LoadNoteskin(prof.noteskin);
         }
@@ -2808,7 +3111,7 @@ void GameWindow::RenderProfileManage() {
             DrawRect(panel_x + 5, item_y - 2, panel_w - 10, item_h, {60, 60, 120, 180});
         }
 
-        Color text_col = selected ? Color{255, 255, 255, 255} : Color{180, 180, 200, 200};
+        Color text_col = selected ? Color{255, 255, 255, 255} : Color{180, 180, 200, 180};
         
         if (i < static_cast<int>(local_profile_names_.size())) {
             // Existing profile
@@ -2880,6 +3183,7 @@ void GameWindow::RenderProfileManage() {
     font_.DrawText(renderer_, fx, fy + 12, "ESC", white, FontSize::SMALL);
     font_.DrawText(renderer_, fx + 30, fy + 12, "BACK", dim, FontSize::SMALL);
 }
+
 
 // ============================================================================
 // Song Select Screen
@@ -3005,6 +3309,18 @@ void GameWindow::RenderCalibration() {
     font_.DrawText(renderer_, cx, hint_y, "Adjust global delay between audio and gameplay.", {150, 150, 170, 255}, FontSize::SMALL, TextAlign::CENTER);
     font_.DrawText(renderer_, cx, hint_y + 25, "Positive (+) if audio is LATE. Negative (-) if audio is EARLY.", {150, 150, 170, 255}, FontSize::SMALL, TextAlign::CENTER);
     font_.DrawText(renderer_, cx, height_ - 50, "ARROWS: ADJUST | ENTER: SELECT | ESC/F11: SAVE & EXIT", {150, 150, 170, 255}, FontSize::SMALL, TextAlign::CENTER);
+
+    // Calibration Overlay
+    if (is_calibrating_ && suggested_offset_ != 0.0) {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "SUGGESTED OFFSET: %+d ms (SD: %.1f ms)", 
+            (int)(suggested_offset_ * 1000), calibration_stdev_ * 1000);
+        
+        // Render centered overlay
+        int cx = width_ / 2;
+        font_.DrawText(renderer_, cx, height_ / 2 + 100, buf, {100, 255, 100, 255}, FontSize::MEDIUM, TextAlign::CENTER);
+        font_.DrawText(renderer_, cx, height_ / 2 + 130, "PRESS [F11] TO FINISH & SAVE", {150, 150, 170, 255}, FontSize::SMALL, TextAlign::CENTER);
+    }
 }
 
 void GameWindow::RenderSongSelect() {
@@ -3018,6 +3334,7 @@ void GameWindow::RenderSongSelect() {
     }
 
     RenderSongList();
+
     for (int p = 0; p < MAX_PLAYERS; ++p) {
         if (players_[p].joined) {
             RenderChartPanel(p);
@@ -3075,10 +3392,24 @@ void GameWindow::RenderSongList() {
             int x = grid_left + c * (jacket_size + spacing);
             int y = grid_top + (r + 2) * (jacket_size + spacing); // r+2 maps -2..2 to 0..4
             
+            // Apply bounce animation to the selected item
             bool is_selected = (song_idx == selected_song_);
+            double scale = 1.0;
+            if (is_selected) {
+                scale = 1.0 + 0.05 * std::sin(global_anim_timer_ * 5.0);
+            }
+            
+            // Entrance slide
+            double entrance = std::min(1.0, (global_anim_timer_ - (r+2)*0.1) / 0.5);
+            if (entrance < 0) entrance = 0;
+            int x_anim = static_cast<int>(x + (1.0 - std::pow(1.0 - entrance, 3.0)) * 50 - 50);
 
             // Jacket background
-            DrawRect(x, y, jacket_size, jacket_size, {20, 20, 40, 255});
+            int cur_size = static_cast<int>(jacket_size * scale);
+            int cur_x = x_anim - (cur_size - jacket_size) / 2;
+            int cur_y = y - (cur_size - jacket_size) / 2;
+
+            DrawRect(cur_x, cur_y, cur_size, cur_size, {20, 20, 40, static_cast<uint8_t>(255 * entrance)});
 
             // Load and Draw Jacket
             SDL_Texture* jacket = GetJacketTexture(song.jacket_path);
@@ -3088,19 +3419,21 @@ void GameWindow::RenderSongList() {
                 double aspect = static_cast<double>(jw) / jh;
                 SDL_Rect dest;
                 if (aspect > 1.0) {
-                    int h = static_cast<int>(jacket_size / aspect);
-                    dest = { x, y + (jacket_size - h) / 2, jacket_size, h };
+                    int h = static_cast<int>(cur_size / aspect);
+                    dest = { cur_x, cur_y + (cur_size - h) / 2, cur_size, h };
                 } else {
-                    int w = static_cast<int>(jacket_size * aspect);
-                    dest = { x + (jacket_size - w) / 2, y, w, jacket_size };
+                    int w = static_cast<int>(cur_size * aspect);
+                    dest = { cur_x + (cur_size - w) / 2, cur_y, w, cur_size };
                 }
+                SDL_SetTextureAlphaMod(jacket, static_cast<uint8_t>(255 * entrance));
                 SDL_RenderCopy(renderer_, jacket, nullptr, &dest);
+                SDL_SetTextureAlphaMod(jacket, 255);
             } else {
-                int cx = x + jacket_size / 2;
-                int cy = y + jacket_size / 2;
-                DrawRect(cx - 5, cy - 15, 8, 30, {60, 60, 80, 255});
-                DrawRect(cx - 15, cy + 8, 18, 12, {60, 60, 80, 255});
-                font_.DrawText(renderer_, cx, cy + 30, "NO IMAGE", {50, 50, 70, 255}, FontSize::SMALL, TextAlign::CENTER);
+                int cx = cur_x + cur_size / 2;
+                int cy = cur_y + cur_size / 2;
+                DrawRect(cx - 5, cy - 15, 8, 30, {60, 60, 80, static_cast<uint8_t>(255 * entrance)});
+                DrawRect(cx - 15, cy + 8, 18, 12, {60, 60, 80, static_cast<uint8_t>(255 * entrance)});
+                font_.DrawText(renderer_, cx, cy + 30, "NO IMAGE", {50, 50, 70, static_cast<uint8_t>(255 * entrance)}, FontSize::SMALL, TextAlign::CENTER);
             }
 
             // Selection Border & Glow (Only if selected)
@@ -3142,6 +3475,10 @@ void GameWindow::RenderChartPanel(int p) {
     int y = panel_top;
     for (size_t ci = 0; ci < song.charts.size(); ++ci) {
         const auto& chart = song.charts[ci];
+        
+        // Skip 8-lane charts in 2P
+        if (num_active_players_ >= 2 && chart.Is8Lane()) continue;
+
         bool selected = (static_cast<int>(ci) == selected_chart_[p]);
         Color diff_col = GetDifficultyColor(chart.difficulty_name);
         
@@ -3188,9 +3525,8 @@ void GameWindow::RenderChartPanel(int p) {
                            selected ? Color{255, 255, 255, 255} : diff_col, 
                            FontSize::LARGE, meter_align);
         } else {
-            char meter_buf[8];
-            std::snprintf(meter_buf, sizeof(meter_buf), "%d", chart.custom_difficulty);
-            font_.DrawText(renderer_, meter_x, y + 4, meter_buf, 
+            std::string meter_str = FormatMeter(chart.custom_difficulty);
+            font_.DrawText(renderer_, meter_x, y + 4, meter_str, 
                            selected ? Color{255, 255, 255, 255} : diff_col, 
                            FontSize::LARGE, meter_align);
         }
@@ -3257,7 +3593,7 @@ void GameWindow::RenderSongSelectHUD() {
         const auto& song = songs[static_cast<size_t>(selected_song_)];
         
         // Draw Large Title (Centered)
-        font_.DrawText(renderer_, width_ / 2, 10, song.title, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::CENTER, 1.0, "score");
+        font_.DrawText(renderer_, width_ / 2, 10, song.title, {255, 255, 255, 255}, FontSize::TITLE, TextAlign::CENTER, 1.0, "score");
         // Draw Medium Artist (Centered)
         font_.DrawText(renderer_, width_ / 2, 45, song.artist, {200, 200, 220, 255}, FontSize::MEDIUM, TextAlign::CENTER);
     } else {
@@ -3298,20 +3634,30 @@ void GameWindow::RenderSongSelectHUD() {
                 const auto& chart = song.charts[c_idx];
                 
                 // Diff Name + Meter
-                char diff_buf[64];
-                std::snprintf(diff_buf, sizeof(diff_buf), "%s %d", chart.difficulty_name.c_str(), chart.difficulty_meter);
+                std::string meter_str = FormatMeter(chart.custom_difficulty);
                 
-                Color d_col = {255, 255, 255, 255};
-                if (chart.difficulty_name == "Beginner") d_col = {100, 200, 255, 255};
-                else if (chart.difficulty_name == "Easy") d_col = {120, 255, 120, 255};
-                else if (chart.difficulty_name == "Medium") d_col = {255, 255, 100, 255};
-                else if (chart.difficulty_name == "Hard") d_col = {255, 100, 100, 255};
-                else if (chart.difficulty_name == "Challenge") d_col = {200, 100, 255, 255};
+                Color d_col = GetDifficultyColor(chart.difficulty_name);
 
-                font_.DrawText(renderer_, px, 55, diff_buf, d_col, FontSize::MEDIUM, align);
+                if (chart.variant == ChartVariant::Wild) {
+                    std::string wild_text = "WILD";
+                    if (!chart.variant_kanji.empty()) wild_text = chart.variant_kanji;
+                    font_.DrawText(renderer_, px, 55, wild_text, d_col, FontSize::MEDIUM, align);
+                    int tw = font_.GetTextWidth(wild_text, FontSize::MEDIUM);
+                    int mx = (align == TextAlign::LEFT) ? px + tw + 10 : px - tw - 10;
+                    font_.DrawText(renderer_, mx, 55 + 4, meter_str, {255, 255, 255, 255}, FontSize::SMALL, align);
+                } else {
+                    std::string full_str = chart.difficulty_name + " " + meter_str;
+                    font_.DrawText(renderer_, px, 55, full_str, d_col, FontSize::MEDIUM, align);
+                }
                 
                 // Chart Type (Single/Double)
                 font_.DrawText(renderer_, px, 35, chart.chart_type, {180, 180, 200, 200}, FontSize::SMALL, align);
+
+                // Ready Status
+                if (players_[p].ready) {
+                    int ready_y = 100;
+                    font_.DrawText(renderer_, px, ready_y, "READY", {100, 255, 100, 255}, FontSize::MEDIUM, align);
+                }
             }
         }
 
@@ -3478,9 +3824,8 @@ void GameWindow::RenderDecide() {
         Color diff_col = GetDifficultyColor(chart->difficulty_name);
         font_.DrawText(renderer_, px, panel_y, diff_label, diff_col, FontSize::MEDIUM, align);
         
-        char meter_buf[16];
-        std::snprintf(meter_buf, sizeof(meter_buf), "%d", chart->difficulty_meter);
-        font_.DrawText(renderer_, px, panel_y + 35, meter_buf, {255, 255, 255, 255}, FontSize::LARGE, align);
+        std::string meter_str = FormatMeter(chart->custom_difficulty);
+        font_.DrawText(renderer_, px, panel_y + 35, meter_str, {255, 255, 255, 255}, FontSize::LARGE, align);
 
         // Best Score
         std::string score_key = songs[static_cast<size_t>(selected_song_)].filepath + "|" + std::to_string(selected_chart_[p]);
@@ -3499,11 +3844,17 @@ void GameWindow::RenderDecide() {
 void GameWindow::RenderGameplay() {
     RenderBackground();
 
+    static uint64_t last_eval_tick = 0;
+    uint64_t current_tick = SDL_GetPerformanceCounter();
+    double frame_dt = (last_eval_tick == 0) ? 0.016 : static_cast<double>(current_tick - last_eval_tick) / SDL_GetPerformanceFrequency();
+    last_eval_tick = current_tick;
+
     // --- Per-player notefield rendering ---
     for (int p = 0; p < MAX_PLAYERS; ++p) {
         if (!players_[p].joined) continue;
+        auto& ps = players_[p];
         render_player_idx_ = p;
-        render_x_offset_ = players_[p].field_x_offset;
+        render_x_offset_ = ps.field_x_offset;
 
         // Clip to this player's half if 2P
         if (num_active_players_ >= 2) {
@@ -3511,12 +3862,86 @@ void GameWindow::RenderGameplay() {
             SDL_RenderSetClipRect(renderer_, &clip);
         }
 
+        // --- ATTACK EVALUATION ---
+        ActiveMods raw_mods;
+        if (active_simfile_ && ps.current_chart && !active_simfile_->GetEffectiveAttacks(*ps.current_chart).empty()) {
+            raw_mods = EvaluateAttacks(active_simfile_->GetEffectiveAttacks(*ps.current_chart), play_time_);
+        }
+
+        // Apply smoothing (seamless transitions) — ~100ms window
+        // Use a 50ms window for 'Binary' effects like Blink to minimize lingering
+        double smoothing_dur = 0.1; // 100ms
+        double alpha = (smoothing_dur > 0) ? std::min(1.0, frame_dt / smoothing_dur) : 1.0;
+        ps.smoothed_mods = LerpActiveMods(ps.smoothed_mods, raw_mods, alpha);
+        
+        ActiveMods mods = ps.smoothed_mods;
+        // Snap Blink if it's too low to prevent lingering
+        if (raw_mods.blink == 0.0 && mods.blink < 10.0) mods.blink = 0.0;
+
+        // Prepare frame-local config that accounts for Reverse modulation
+        NoteFieldConfig frame_cfg = ps.field_config;
+        double r_pct = std::clamp(mods.reverse / 100.0, 0.0, 1.0);
+        frame_cfg.reverse_pct = r_pct;
+
+        // Interpolate receptor_y smoothly
+        double y_up = height_ * 0.15;
+        double y_down = height_ * 0.85;
+        if (ps.field_config.downscroll) {
+            frame_cfg.receptor_y = y_down * (1.0 - r_pct) + y_up * r_pct;
+        } else {
+            frame_cfg.receptor_y = y_up * (1.0 - r_pct) + y_down * r_pct;
+        }
+
         RenderLanes();
-        RenderMeasureLines();
-        RenderNotes();
-        RenderReceptors();
-        RenderHitFlashes();
-        RenderJudgement();
+        RenderMeasureLines(frame_cfg, mods);
+        
+        // Render notes even if failed (allows "ghosting")
+        RenderNotes(frame_cfg, mods);
+
+        // Suppress judgements/flashes for failed players
+        if (!ps.failed_sequence) {
+            RenderHitFlashes(frame_cfg, mods);
+            RenderJudgement();
+        }
+        
+        RenderReceptors(frame_cfg, mods);
+        RenderHoldIndicators(p, frame_cfg, mods);
+
+        // Refined Dimming overlay for failed players (Animated Gradient)
+        if (ps.failed_sequence) {
+            double fade_in = std::min(1.0, ps.fail_animation_timer / 0.8);
+            uint8_t base_alpha = static_cast<uint8_t>(180 * fade_in);
+            
+            int area_x = (p == 0) ? 0 : width_ / 2;
+            int area_w = (num_active_players_ >= 2) ? width_ / 2 : width_;
+            
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            
+            // Draw gradient using vertical strips
+            int num_strips = 32;
+            int strip_w = (area_w + num_strips - 1) / num_strips;
+            
+            for (int i = 0; i < num_strips; ++i) {
+                // Calculate horizontal progress within the player's area (0.0 to 1.0)
+                // P1: 0.0 is left edge, 1.0 is divider
+                // P2: 0.0 is divider, 1.0 is right edge
+                double progress = static_cast<double>(i) / (num_strips - 1);
+                
+                // We want opaque at the outer edges, transparent at the divider.
+                double alpha_factor = 0.0;
+                if (p == 0) {
+                    alpha_factor = 1.0 - progress; // Opaque at x=0, Transparent at divider
+                } else {
+                    alpha_factor = progress;       // Transparent at divider, Opaque at x=width
+                }
+                
+                uint8_t alpha = static_cast<uint8_t>(base_alpha * alpha_factor);
+                SDL_SetRenderDrawColor(renderer_, 0, 0, 0, alpha);
+                
+                SDL_Rect strip = { area_x + i * strip_w, 0, strip_w, height_ };
+                SDL_RenderFillRect(renderer_, &strip);
+            }
+        }
 
         if (num_active_players_ >= 2) {
             SDL_RenderSetClipRect(renderer_, NULL);
@@ -3528,11 +3953,6 @@ void GameWindow::RenderGameplay() {
 
     // HUD Elements
     RenderHUD();
-
-    if (num_active_players_ >= 2) {
-        // Divider line between P1 and P2
-        DrawRect(width_ / 2 - 1, 0, 2, height_, {40, 40, 70, 200});
-    }
     
     // --- Get Ready Animation Rendering ---
     if (!is_transitioning_ && ready_animation_timer_ > 0.0) {
@@ -3606,14 +4026,128 @@ void GameWindow::RenderGameplay() {
     RenderMasks();
 }
 
+SDL_Texture* GameWindow::GetBGATexture(const std::string& path) {
+    if (path.empty()) return nullptr;
+    
+    // Check if it's potentially a video file
+    fs::path sim_dir(active_simfile_ ? active_simfile_->directory : "");
+    fs::path target_path = sim_dir / path;
+    
+    std::string ext = target_path.extension().string();
+    for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    bool is_video = (ext == ".mp4" || ext == ".avi" || ext == ".mpg" || ext == ".mpeg" || ext == ".flv" || ext == ".mov" || ext == ".wmv" || ext == ".mkv" || ext == ".webm");
+
+    if (is_video) {
+        // If this is a new video or the decoder isn't loaded, try to load it
+        if (video_path_ != target_path.string()) {
+            if (video_decoder_.Load(target_path.string(), renderer_)) {
+                video_path_ = target_path.string();
+            } else {
+                // If video load failed, clear video_path_ so we don't keep trying this specific file as a video
+                video_path_ = "";
+            }
+        }
+        
+        if (video_decoder_.IsLoaded() && video_path_ == target_path.string()) {
+            return video_decoder_.GetTexture();
+        }
+    }
+
+    // Not a video or video load failed - check image cache
+    auto it = bga_textures_.find(path);
+    if (it != bga_textures_.end()) return it->second;
+
+    // 1. Try to load as a static image
+    int bw, bh;
+    SDL_Texture* tex = LoadTexture(target_path.string(), &bw, &bh);
+
+    if (tex) {
+        bga_textures_[path] = tex;
+        return tex;
+    }
+
+    // 2. If image load failed (and it was a video), try image fallbacks
+    if (is_video) {
+        const char* img_exts[] = {".png", ".jpg", ".jpeg", ".bmp"};
+        bool found_fallback = false;
+        
+        // 2a. Try replacing extension
+        for (const char* ie : img_exts) {
+            fs::path fallback = target_path;
+            fallback.replace_extension(ie);
+            if (fs::exists(fallback)) {
+                target_path = fallback;
+                found_fallback = true;
+                break;
+            }
+        }
+
+        // 2b. If not found, look for largest image in dir
+        if (!found_fallback && fs::exists(sim_dir)) {
+             uintmax_t max_size = 0;
+             fs::path best_match;
+             
+             for (const auto& entry : fs::directory_iterator(sim_dir)) {
+                 if (entry.is_regular_file()) {
+                     std::string e = entry.path().extension().string();
+                     std::transform(e.begin(), e.end(), e.begin(), ::tolower);
+                     if (e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".bmp") {
+                         if (entry.file_size() > max_size) {
+                             max_size = entry.file_size();
+                             best_match = entry.path();
+                         }
+                     }
+                 }
+             }
+             
+             if (!best_match.empty()) {
+                 target_path = best_match;
+                 found_fallback = true;
+             }
+        }
+
+        if (found_fallback) {
+            tex = LoadTexture(target_path.string(), &bw, &bh);
+        }
+    }
+    
+    // Cache the result (image or fallback)
+    bga_textures_[path] = tex; 
+    return tex;
+}
+
 void GameWindow::RenderBackground() {
     // Pure black background by default
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);
 
-    if (bg_texture_) {
+    if (!active_simfile_) return;
+
+    // Find current BGA event
+    double current_beat = conductor_.TimeToBeat(play_time_);
+    SDL_Texture* tex = bg_texture_; // Fallback to static background
+
+    if (!active_simfile_->bg_changes.empty()) {
+        // Find last event with beat <= current_beat
+        const BGEvent* best_ev = nullptr;
+        for (const auto& ev : active_simfile_->bg_changes) {
+            if (ev.beat <= current_beat) {
+                best_ev = &ev;
+            } else {
+                break;
+            }
+        }
+        if (best_ev) {
+            tex = GetBGATexture(best_ev->file);
+        }
+    } else if (!auto_bga_file_.empty() && current_beat >= 0.0) {
+        // Fallback to auto-discovered BGA
+        tex = GetBGATexture(auto_bga_file_);
+    }
+
+    if (tex) {
         int bw, bh;
-        SDL_QueryTexture(bg_texture_, nullptr, nullptr, &bw, &bh);
+        SDL_QueryTexture(tex, nullptr, nullptr, &bw, &bh);
         
         // Scale to FILL the screen (keeping aspect ratio)
         double screen_aspect = static_cast<double>(width_) / height_;
@@ -3630,11 +4164,27 @@ void GameWindow::RenderBackground() {
             dest = { 0, (height_ - h) / 2, width_, h };
         }
         
-        // Slightly dim the background image (Pulse removed as per request)
-        int final_dim = 100;
+        // Apply brightness from active player (or P1 fallback)
+        // Lighter: 100% (255), Normal: 80% (204), Dark: 60% (153), Darker: 40% (102), Darkest: 20% (51)
+        int brightness_val = 204; // Normal default
+        
+        int p_idx = 0;
+        if (players_[active_player_idx_].joined) p_idx = active_player_idx_;
+        else if (players_[0].joined) p_idx = 0;
+        else if (players_[1].joined) p_idx = 1;
 
-        SDL_SetTextureColorMod(bg_texture_, final_dim, final_dim, final_dim);
-        SDL_RenderCopy(renderer_, bg_texture_, nullptr, &dest);
+        if (players_[p_idx].joined) {
+            switch (players_[p_idx].bga_brightness) {
+                case BGABrightness::LIGHTER: brightness_val = 255; break;
+                case BGABrightness::NORMAL:  brightness_val = 204; break;
+                case BGABrightness::DARK:    brightness_val = 153; break;
+                case BGABrightness::DARKER:  brightness_val = 102; break;
+                case BGABrightness::DARKEST: brightness_val = 51;  break;
+            }
+        }
+
+        SDL_SetTextureColorMod(tex, brightness_val, brightness_val, brightness_val);
+        SDL_RenderCopy(renderer_, tex, nullptr, &dest);
     }
 }
 
@@ -3643,20 +4193,29 @@ void GameWindow::RenderLanes() {
     // (Transparent notefield)
 }
 
-void GameWindow::RenderReceptors() {
+void GameWindow::RenderReceptors(const NoteFieldConfig& cfg, const ActiveMods& mods) {
     auto& ps = players_[render_player_idx_];
     const NoteChart* chart = ps.current_chart;
     if (!chart) return;
     
-    const auto& cfg = ps.field_config;
+    // Stealth: hide receptors if strength > 50%
+    if (mods.stealth > 50.0) return;
+
     int num_cols = current_chart_->num_columns;
     int lane_w = GetLaneWidth();
+    double mini_scale = mods.mini != 0.0 ? CalcMiniScale(mods.mini) : 1.0;
     int receptor_y = static_cast<int>(cfg.receptor_y);
 
+    // Note: Receptors silhouettes were removed as per user request (only on hit)
+
     // --- Per-lane flash textures (kept from before) ---
+    bool effectively_down = cfg.downscroll ^ (cfg.reverse_pct > 0.5);
+
     for (int i = 0; i < num_cols; ++i) {
-        int x = GetLaneX(i);
-        // Use per-player InputMapper if a player is being rendered, otherwise legacy
+        double tipsy_x = CalcTipsyOffset(mods.tipsy, play_time_, i);
+        int x = GetLaneX(i) + static_cast<int>(tipsy_x);
+        
+        // Use per-player InputMappers if a player is being rendered, otherwise legacy
         const auto& lane = (render_player_idx_ < MAX_PLAYERS && players_[render_player_idx_].joined)
             ? players_[render_player_idx_].input.GetLaneState(i)
             : input_.GetLaneState(i);
@@ -3675,20 +4234,24 @@ void GameWindow::RenderReceptors() {
             SDL_SetTextureAlphaMod(flash_texture_, alpha);
             SDL_SetTextureColorMod(flash_texture_, fcol.r, fcol.g, fcol.b);
             
-            int draw_w = lane_w;
-            int draw_h = static_cast<int>(flash_tex_h_ * (static_cast<double>(lane_w) / flash_tex_w_));
+            int draw_w = static_cast<int>(lane_w * mini_scale);
+            int draw_h = static_cast<int>(flash_tex_h_ * (static_cast<double>(lane_w) / flash_tex_w_) * mini_scale);
             
-            SDL_Rect dst;
-            SDL_RendererFlip flip = SDL_FLIP_NONE;
-
-            if (cfg.downscroll) {
-                dst = { x, receptor_y - draw_h + 50, draw_w, draw_h };
-                flip = SDL_FLIP_VERTICAL;
-            } else {
-                dst = { x, receptor_y - 50, draw_w, draw_h };
-                flip = SDL_FLIP_NONE;
+            // Center scaled receptor
+            int rx = x;
+            if (mini_scale != 1.0) {
+                rx += (lane_w - draw_w) / 2;
             }
-            SDL_RenderCopyEx(renderer_, flash_texture_, nullptr, &dst, 0.0, nullptr, flip);
+
+            double angle = effectively_down ? 180.0 : 0.0;
+            SDL_Rect dst;
+            if (effectively_down) {
+                dst = { rx, receptor_y - draw_h + 50, draw_w, draw_h };
+            } else {
+                dst = { rx, receptor_y - 50, draw_w, draw_h };
+            }
+            SDL_RendererFlip flip = SDL_FLIP_NONE;
+            SDL_RenderCopyEx(renderer_, flash_texture_, nullptr, &dst, angle, nullptr, flip);
             SDL_SetTextureColorMod(flash_texture_, 255, 255, 255); // Reset
         }
     }
@@ -3698,8 +4261,9 @@ void GameWindow::RenderReceptors() {
 
 
     // --- SMX-style: Unified padding lines on left and right edges ---
-    int field_left = GetFieldLeft();
-    int field_right = GetFieldRight();
+    double field_tipsy_x = CalcTipsyOffset(mods.tipsy, play_time_, 0); // Global wobble
+    int field_left = GetFieldLeft() + static_cast<int>(field_tipsy_x);
+    int field_right = GetFieldRight() + static_cast<int>(field_tipsy_x);
     double scale = static_cast<double>(width_) / 900.0;
     int pad_w = static_cast<int>(5.0 * scale);   // 5px wide at 900px
     int pad_h = static_cast<int>(50.0 * scale);  // 50px tall at 900px
@@ -3707,13 +4271,13 @@ void GameWindow::RenderReceptors() {
     // Receptor_y is the midpoint of the padding lines
     int pad_top = receptor_y - pad_half_h;
 
-    // Left padding line (just outside the left edge of the field) 窶・blinks on beat
+    // Left padding line (just outside the left edge of the field) — blinks on beat
     uint8_t pad_alpha = static_cast<uint8_t>(120 + static_cast<int>(beat_flash_ * 135));
     SDL_SetRenderDrawColor(renderer_, 200, 200, 220, pad_alpha);
     SDL_Rect left_pad = { field_left - pad_w - 2, pad_top, pad_w, pad_h };
     SDL_RenderFillRect(renderer_, &left_pad);
 
-    // Right padding line (just outside the right edge of the field) 窶・blinks on beat
+    // Right padding line (just outside the right edge of the field) — blinks on beat
     SDL_Rect right_pad = { field_right + 2, pad_top, pad_w, pad_h };
     SDL_RenderFillRect(renderer_, &right_pad);
 
@@ -3794,64 +4358,236 @@ void GameWindow::RenderMasks() {
     }
 }
 
-void GameWindow::RenderModifierMenu() {
-    int field_center = (GetFieldLeft() + GetFieldRight()) / 2;
-    int mx = field_center - 200;
-    int my = height_ / 2 - 150;
-    int mw = 400;
-    int mh = 300;
+void GameWindow::RenderModifierMenu(int p) {
+    auto& ps = players_[p];
+    
+    // Simple linear animation for the menu slide-in
+    double dt = 1.0 / 60.0; // Assume 60fps for simple logic if not tracking precisely
+    if (ps.showing_modifier_menu) {
+        ps.modifier_menu_anim = std::min(1.0, ps.modifier_menu_anim + dt * 10.0);
+    } else {
+        ps.modifier_menu_anim = std::max(0.0, ps.modifier_menu_anim - dt * 10.0);
+    }
 
-    // Subdued background for the menu itself
-    DrawRect(mx, my, mw, mh, {0, 0, 0, 180});
-    DrawRectOutline(mx, my, mw, mh, {255, 255, 255, 255});
-    font_.DrawText(renderer_, field_center, my + 10, "MODIFIERS", {255, 255, 255, 255}, FontSize::MEDIUM, TextAlign::CENTER);
+    if (ps.modifier_menu_anim <= 0.0) return;
+
+    // Dimensions: Side-aligned "card"
+    int mw = 260;
+    int mh = 420;
+    int mx = (p == 0) ? 20 : (width_ - mw - 20);
+    int my = (height_ - mh) / 2;
+
+    // Apply slide animation (ease-out cubic)
+    double ease = 1.0 - std::pow(1.0 - ps.modifier_menu_anim, 3.0);
+    int slide_x = static_cast<int>((p == 0) ? (-mw * (1.0 - ease)) : (mw * (1.0 - ease)));
+    mx += slide_x;
+
+    // 1. Glassmorphic Background
+    // Outer shadow/border
+    DrawRect(mx - 2, my - 2, mw + 4, mh + 4, {0, 0, 0, 100}); // Shadow
+    DrawRect(mx, my, mw, mh, {30, 30, 45, 230}); // Main semi-transparent panel
+    DrawRectOutline(mx, my, mw, mh, {255, 255, 255, 60}); // Subtle white outline
+    
+    // Vertical accent bar
+    Color p_col = (p == 0) ? Color{100, 150, 255, 255} : Color{255, 100, 150, 255};
+    DrawRect((p == 0) ? mx : (mx + mw - 4), my, 4, mh, p_col);
+
+    // Header
+    font_.DrawText(renderer_, mx + mw/2, my + 15, "PLAYER MODS", {255, 255, 255, 255}, FontSize::MEDIUM, TextAlign::CENTER);
+    DrawRect(mx + 20, my + 35, mw - 40, 1, {255, 255, 255, 40});
 
     auto renderItem = [&](int idx, const std::string& label, const std::string& value) {
-        int y = my + 50 + idx * 25;
-        Color col = (modifier_menu_cursor_ == idx) ? Color{255, 255, 0, 255} : Color{200, 200, 200, 255};
-        if (modifier_menu_cursor_ == idx) {
-            font_.DrawText(renderer_, mx + 10, y, ">", col, FontSize::SMALL, TextAlign::LEFT);
+        int y_pos = my + 55 + idx * 30;
+        bool selected = (ps.modifier_menu_cursor == idx);
+        Color item_col = selected ? Color{255, 255, 255, 255} : Color{180, 180, 200, 180};
+        
+        if (selected) {
+            // Highlight bar
+            DrawRect(mx + 6, y_pos - 4, mw - 12, 28, {255, 255, 255, 30});
+            DrawRectOutline(mx + 6, y_pos - 4, mw - 12, 28, {255, 255, 255, 50});
         }
-        font_.DrawText(renderer_, mx + 30, y, label, col, FontSize::SMALL, TextAlign::LEFT);
-        font_.DrawText(renderer_, mx + mw - 10, y, value, col, FontSize::SMALL, TextAlign::RIGHT);
+
+        font_.DrawText(renderer_, mx + 15, y_pos, label, item_col, FontSize::SMALL, TextAlign::LEFT);
+        font_.DrawText(renderer_, mx + mw - 15, y_pos, value, selected ? p_col : item_col, FontSize::SMALL, TextAlign::RIGHT);
     };
 
     char buf[64];
-    if (field_config_.mod_type == ScrollModType::CMod) std::snprintf(buf, sizeof(buf), "%d", (int)field_config_.speed_mod);
-    else std::snprintf(buf, sizeof(buf), "%.2f", field_config_.speed_mod);
+    // 0: Speed
+    if (ps.field_config.mod_type == ScrollModType::CMod) std::snprintf(buf, sizeof(buf), "%d", (int)ps.field_config.speed_mod);
+    else std::snprintf(buf, sizeof(buf), "%.2f", ps.field_config.speed_mod);
     renderItem(0, "Speed", buf);
 
-    renderItem(1, "Mod Type", (field_config_.mod_type == ScrollModType::XMod) ? "X-Mod" : "C-Mod");
-    renderItem(2, "Scroll", field_config_.downscroll ? "Downscroll" : "Upscroll");
+    // 1: Type
+    renderItem(1, "Mod Type", (ps.field_config.mod_type == ScrollModType::XMod) ? "X-Mod" : "C-Mod");
     
-    std::snprintf(buf, sizeof(buf), "%d%%", (int)(sudden_plus_val_ * 100));
+    // 2: Scroll
+    renderItem(2, "Scroll", ps.field_config.downscroll ? "Downscroll" : "Upscroll");
+    
+    // 3: Sudden
+    std::snprintf(buf, sizeof(buf), "%d%%", (int)(ps.sudden_plus_val * 100));
     renderItem(3, "Sudden+", buf);
     
-    std::snprintf(buf, sizeof(buf), "%d%%", (int)(hidden_plus_val_ * 100));
+    // 4: Hidden
+    std::snprintf(buf, sizeof(buf), "%d%%", (int)(ps.hidden_plus_val * 100));
     renderItem(4, "Hidden+", buf);
 
-    renderItem(5, "Noteskin", available_noteskins_[noteskin_index_]);
+    // 5: Skin
+    renderItem(5, "Noteskin", available_noteskins_[ps.noteskin_index]);
 
+    // 6: Effect
     const char* effect_names[] = {"None", "Mirror", "Random"};
-    renderItem(6, "Effects", effect_names[effect_mode_]);
+    renderItem(6, "Effects", effect_names[ps.effect_mode]);
 
+    // 7: Life
     std::string life_name = "Standard";
-    if (life_meter_.GetType() == LifeType::LIFE4) life_name = "Life4";
-    else if (life_meter_.GetType() == LifeType::RISKY) life_name = "Risky";
-    else if (life_meter_.GetType() == LifeType::FLARE) {
-        std::snprintf(buf, sizeof(buf), "Flare %d", life_meter_.GetFlareLevel());
+    if (ps.life_meter.GetType() == LifeType::LIFE4) life_name = "Life4";
+    else if (ps.life_meter.GetType() == LifeType::RISKY) life_name = "Risky";
+    else if (ps.life_meter.GetType() == LifeType::FLARE) {
+        std::snprintf(buf, sizeof(buf), "Flare %d", ps.life_meter.GetFlareLevel());
         life_name = buf;
     }
     renderItem(7, "Life Mode", life_name);
 
-    renderItem(8, "Scoring", ex_mode_ ? "EX Mode" : "Normal");
-    renderItem(9, "Center 1P", center_1p_ ? "On" : "Off");
+    // 8: Scoring
+    renderItem(8, "Scoring", ps.ex_mode ? "EX Mode" : "Normal");
+
+    // 9: Center (P1 only)
+    if (p == 0) {
+        renderItem(9, "Center 1P", center_1p_ ? "On" : "Off");
+    } else {
+        renderItem(9, "-", "-");
+    }
+
+    // 10: Combo Display
+    const char* combo_names[] = {
+        "None", "Combo", "Score (+)", "Score (-)",
+        "Border S", "Border S+", "Border SS", "Border SS+", "Border SSS", "Border SSS+",
+        "EX (+)", "EX (-)",
+        "Border 1*", "Border 2*", "Border 3*", "Border 4*", "Border 5*", "Border 6*",
+        "Hit Offset"
+    };
+    renderItem(10, "Combo Opt", combo_names[static_cast<int>(ps.combo_display_mode)]);
+    
+    // 11: BGA Brightness
+    const char* bga_names[] = {"Lighter", "Normal", "Dark", "Darker", "Darkest"};
+    renderItem(11, "BGA Bright", bga_names[static_cast<int>(ps.bga_brightness)]);
+
+    // Sync to profile if changed
+    if (ps.profile.combo_display_mode != static_cast<int>(ps.combo_display_mode)) {
+        ps.profile.combo_display_mode = static_cast<int>(ps.combo_display_mode);
+        // Note: Profile saving happens automatically on chart exit or profile unjoin
+    }
 }
 
-void GameWindow::RenderHitFlashes() {
+std::string GameWindow::GetComboDisplayText(int p) {
+    auto& ps = players_[p];
+    if (ps.combo_display_mode == ComboDisplayMode::None) return "";
+    if (ps.combo_display_mode == ComboDisplayMode::Combo) {
+        if (ps.combo <= 1) return "";
+        return std::to_string(ps.combo);
+    }
+    if (ps.combo_display_mode == ComboDisplayMode::HitOffset) {
+        if (ps.last_judgement == Judgement::NONE || ps.last_judgement == Judgement::MISS) return "";
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%+.1fms", ps.last_timing_error * 1000.0);
+        return buf;
+    }
+
+    // Scoring logic (Subtractive / Diff)
+    double total_notes = static_cast<double>(ps.total_hittable_notes);
+    if (total_notes <= 0) return "100.00"; // Fallback
+
+    int judged_notes = ps.total_hits + ps.total_miss;
+    
+    // Normal weights (101.0 max)
+    double max_w_norm = 101.0;
+    double max_possible_norm = total_notes * max_w_norm;
+    double points_lost_norm = (judged_notes * max_w_norm) - ps.normal_score;
+
+    // EX weights (100.0 max)
+    double max_w_ex = 100.0;
+    double max_possible_ex = total_notes * max_w_ex;
+    double points_lost_ex = (judged_notes * max_w_ex) - ps.ex_score;
+    
+    char buf[64];
+    switch (ps.combo_display_mode) {
+        case ComboDisplayMode::AdditiveScore: {
+            double acc = (total_notes > 0) ? (ps.normal_score / total_notes) : 0.0;
+            std::snprintf(buf, sizeof(buf), "%.4f%%", acc);
+            return buf;
+        }
+        case ComboDisplayMode::SubtractiveScore: {
+            double acc = (total_notes > 0) ? ((max_possible_norm - points_lost_norm) / total_notes) : 101.0;
+            std::snprintf(buf, sizeof(buf), "%.4f%%", acc);
+            return buf;
+        }
+        case ComboDisplayMode::AdditiveEX: {
+            double acc = (ps.ex_score / total_notes);
+            std::snprintf(buf, sizeof(buf), "%.2f%%", acc);
+            return buf;
+        }
+        case ComboDisplayMode::SubtractiveEX: {
+            double potential = (max_possible_ex - points_lost_ex) / total_notes;
+            std::snprintf(buf, sizeof(buf), "%.2f%%", potential);
+            return buf;
+        }
+        case ComboDisplayMode::DiffS:
+        case ComboDisplayMode::DiffS_Plus:
+        case ComboDisplayMode::DiffSS:
+        case ComboDisplayMode::DiffSS_Plus:
+        case ComboDisplayMode::DiffSSS:
+        case ComboDisplayMode::DiffSSS_Plus: {
+            double target = 97.5;
+            if (ps.combo_display_mode == ComboDisplayMode::DiffS_Plus) target = 99.0;
+            else if (ps.combo_display_mode == ComboDisplayMode::DiffSS) target = 100.0;
+            else if (ps.combo_display_mode == ComboDisplayMode::DiffSS_Plus) target = 100.5;
+            else if (ps.combo_display_mode == ComboDisplayMode::DiffSSS) target = 100.75;
+            else if (ps.combo_display_mode == ComboDisplayMode::DiffSSS_Plus) target = 100.9;
+            
+            double target_points = (target / 100.0) * max_possible_norm;
+            double border_score = (max_possible_norm - points_lost_norm - target_points);
+            double border_pct = (border_score / max_possible_norm) * 101.0;
+
+            if (border_pct < 0.0) {
+                if (ps.combo > 1) return std::to_string(ps.combo);
+                return "";
+            }
+
+            std::snprintf(buf, sizeof(buf), "%.4f", border_pct);
+            return buf;
+        }
+        case ComboDisplayMode::DiffEX_1Star:
+        case ComboDisplayMode::DiffEX_2Star:
+        case ComboDisplayMode::DiffEX_3Star:
+        case ComboDisplayMode::DiffEX_4Star:
+        case ComboDisplayMode::DiffEX_5Star:
+        case ComboDisplayMode::DiffEX_6Star: {
+            double target = 60.0;
+            if (ps.combo_display_mode == ComboDisplayMode::DiffEX_2Star) target = 73.0;
+            else if (ps.combo_display_mode == ComboDisplayMode::DiffEX_3Star) target = 82.0;
+            else if (ps.combo_display_mode == ComboDisplayMode::DiffEX_4Star) target = 88.5;
+            else if (ps.combo_display_mode == ComboDisplayMode::DiffEX_5Star) target = 95.0;
+            else if (ps.combo_display_mode == ComboDisplayMode::DiffEX_6Star) target = 100.0;
+            
+            double target_points = (target / 100.0) * max_possible_ex;
+            double border_score = (max_possible_ex - points_lost_ex - target_points);
+            double border_pct = (border_score / max_possible_ex) * 100.0;
+
+            if (border_pct < 0.0) {
+                if (ps.combo > 1) return std::to_string(ps.combo);
+                return "";
+            }
+
+            std::snprintf(buf, sizeof(buf), "%.4f", border_pct);
+            return buf;
+        }
+        default: return "";
+    }
+}
+
+void GameWindow::RenderHitFlashes(const NoteFieldConfig& cfg, const ActiveMods& mods) {
     auto& ps = players_[render_player_idx_];
     if (!note_texture_ || ps.hit_flashes.empty()) return;
-    const auto& cfg = ps.field_config;
 
     int lane_w = GetLaneWidth();
     int fw = note_tex_w_ / 16;
@@ -3864,18 +4600,21 @@ void GameWindow::RenderHitFlashes() {
         uint8_t alpha = static_cast<uint8_t>(alpha_ratio * 200);
 
         int x = GetLaneX(hf.lane);
-        int yi = static_cast<int>(hf.hit_y);
+        int yi = static_cast<int>(cfg.receptor_y);
         int qrow = GetQuantizationRow(hf.beat);
         int frame = 0;
 
         double angle = 0.0;
-        if (hf.lane == 0) angle = 90.0;       // Left
-        else if (hf.lane == 1) angle = 0.0;   // Down
-        else if (hf.lane == 2) angle = 180.0; // Up
-        else if (hf.lane == 3) angle = -90.0; // Right
+        int rot_lane = hf.lane % 4;
+        if (rot_lane == 0) angle = 90.0;       // Left
+        else if (rot_lane == 1) angle = 0.0;   // Down
+        else if (rot_lane == 2) angle = 180.0; // Up
+        else if (rot_lane == 3) angle = -90.0; // Right
 
         SDL_Rect src = { frame * fw, qrow * fh, fw, fh };
-        SDL_Rect dst = { x, yi - dh / 2, lane_w, dh };
+        SDL_Rect dst;
+        // Hit flashes (silhouettes) always centered on hit_y
+        dst = { x, yi - dh / 2, lane_w, dh };
 
         // Color based on judgement
         Color jcol = GetJudgementColor(hf.judge);
@@ -4085,49 +4824,94 @@ void GameWindow::RenderJudgement() {
         DrawRect(tx - 2, bar_y - 3, 4, 8, tick_col);
     }
 
-    // --- Combo display with BOUNCE ---
-    if (combo > 1) {
-        char combo_buf[16];
-        std::snprintf(combo_buf, sizeof(combo_buf), "%d", combo);
-        
-        // Combo Color based on lowest judgement in chain (DDR-style)
-        Color combo_col = {255, 255, 255, 255}; // Default/Highest
-        switch (lowest_j) {
-            case Judgement::PEXTRA:
-            case Judgement::PCRIT:   combo_col = {255, 255, 255, 255}; break; // White
-            case Judgement::PERFECT: 
-            case Judgement::PERFECT_LOW: combo_col = {255, 215, 0, 255}; break;   // Gold
-            case Judgement::GREAT_HIGH:
-            case Judgement::GREAT:
-            case Judgement::GREAT_LOW: combo_col = {100, 255, 100, 255}; break; // Green
-            case Judgement::GOOD:    combo_col = {80, 160, 255, 255}; break;  // Blue
-            default: break;
+    // --- Combo / Score / Custom Display ---
+    std::string custom_text = GetComboDisplayText(render_player_idx_);
+    if (!custom_text.empty()) {
+        bool is_combo = (pstate.combo_display_mode == ComboDisplayMode::Combo);
+        bool is_diff = (static_cast<int>(pstate.combo_display_mode) >= static_cast<int>(ComboDisplayMode::DiffS) &&
+                        static_cast<int>(pstate.combo_display_mode) <= static_cast<int>(ComboDisplayMode::DiffEX_6Star));
+        bool is_score = (pstate.combo_display_mode == ComboDisplayMode::AdditiveScore || 
+                         pstate.combo_display_mode == ComboDisplayMode::SubtractiveScore ||
+                         pstate.combo_display_mode == ComboDisplayMode::AdditiveEX ||
+                         pstate.combo_display_mode == ComboDisplayMode::SubtractiveEX);
+
+        // Animation logic: Only pop when text changes
+        if (custom_text != pstate.last_combo_text) {
+            pstate.score_anim_timer = 0.6; // Matches bounce_duration
+            pstate.last_combo_text = custom_text;
         }
         
-        combo_col.a = static_cast<uint8_t>(255 * alpha_mult);
+        // Color based on context
+        Color text_col = {255, 255, 255, 255};
+        if (is_combo) {
+            switch (lowest_j) {
+                case Judgement::PEXTRA:
+                case Judgement::PCRIT:   text_col = {255, 255, 255, 255}; break; // White
+                case Judgement::PERFECT: 
+                case Judgement::PERFECT_LOW: text_col = {255, 215, 0, 255}; break;   // Gold
+                case Judgement::GREAT_HIGH:
+                case Judgement::GREAT:
+                case Judgement::GREAT_LOW: text_col = {100, 255, 100, 255}; break; // Green
+                case Judgement::GOOD:    text_col = {80, 160, 255, 255}; break;  // Blue
+                default: break;
+            }
+        } else if (is_score && !is_diff) {
+            // Scoring coloring (for Additive/Subtractive non-diff)
+            if (custom_text[0] == '-') text_col = {255, 80, 80, 255};
+            else if (custom_text[0] == '+') text_col = {100, 255, 100, 255};
+        }
+        // Diff modes are forced white as per request
         
-        // Bounce animation: Scale to 1.15x on each increment
+        text_col.a = static_cast<uint8_t>(255 * alpha_mult);
+        
+        // Animation
         double bounce_duration = 0.6;
-        double bounce_elapsed = bounce_duration - j_timer;
+        double bounce_elapsed = bounce_duration - pstate.score_anim_timer;
         double bounce = 1.0 + 0.15 * std::pow(1.0 - std::min(1.0, bounce_elapsed / 0.1), 3.0);
         
-        // Center of the playfield horizontally
         int combo_x = field_center_x;
         int combo_y = judge_y - 115;
 
-        // Draw outlined bold combo number using optimized Score.otf monospaced
-        font_.DrawMonoText(renderer_, combo_x, combo_y, combo_buf, combo_col, FontSize::HUGE, TextAlign::CENTER, bounce, "score", -1, true);
+        // Styled display for scores/diffs
+        if (is_score || is_diff) 
+        {
+            font_.DrawStyledNumber(renderer_, combo_x, combo_y, custom_text, text_col, TextAlign::CENTER, bounce, true, {0,0,0,text_col.a});
+        } else {
+            font_.DrawMonoText(renderer_, combo_x, combo_y, custom_text.c_str(), text_col, FontSize::HUGE, TextAlign::CENTER, bounce, "score", -1, true);
+        }
 
-        font_.DrawText(renderer_, combo_x, combo_y + 50, "COMBO", {220, 220, 240, combo_col.a}, FontSize::SMALL, TextAlign::CENTER);
+        if (is_combo) {
+            font_.DrawText(renderer_, combo_x, combo_y + 50, "COMBO", {220, 220, 240, text_col.a}, FontSize::SMALL, TextAlign::CENTER);
+        } else {
+            // Label for what we are showing
+            const char* label = "";
+            switch(pstate.combo_display_mode) {
+                case ComboDisplayMode::SubtractiveScore: label = "MAX POTENTIAL"; break;
+                case ComboDisplayMode::SubtractiveEX:    label = "MAX EX POTENTIAL"; break;
+                case ComboDisplayMode::DiffS:            label = "S BUFFER"; break;
+                case ComboDisplayMode::DiffS_Plus:       label = "S+ BUFFER"; break;
+                case ComboDisplayMode::DiffSS:           label = "SS BUFFER"; break;
+                case ComboDisplayMode::DiffSS_Plus:      label = "SS+ BUFFER"; break;
+                case ComboDisplayMode::DiffSSS:          label = "SSS BUFFER"; break;
+                case ComboDisplayMode::DiffSSS_Plus:     label = "SSS+ BUFFER"; break;
+                case ComboDisplayMode::DiffEX_1Star:     label = "1* BUFFER"; break;
+                case ComboDisplayMode::DiffEX_2Star:     label = "2* BUFFER"; break;
+                case ComboDisplayMode::DiffEX_3Star:     label = "3* BUFFER"; break;
+                case ComboDisplayMode::DiffEX_4Star:     label = "4* BUFFER"; break;
+                case ComboDisplayMode::DiffEX_5Star:     label = "5* BUFFER"; break;
+                case ComboDisplayMode::DiffEX_6Star:     label = "6* BUFFER"; break;
+                default: break;
+            }
+            if (label[0]) font_.DrawText(renderer_, combo_x, combo_y + 50, label, {200, 200, 220, text_col.a}, FontSize::SMALL, TextAlign::CENTER);
+        }
     }
 }
 
-void GameWindow::RenderMeasureLines() {
+void GameWindow::RenderMeasureLines(const NoteFieldConfig& cfg, const ActiveMods& mods) {
     auto& ps = players_[render_player_idx_];
     const NoteChart* chart = ps.current_chart;
     if (!chart) return;
 
-    const auto& cfg = ps.field_config;
     double current_beat = conductor_.GetCurrentBeat();
     double receptor_y = cfg.receptor_y;
     int receptor_yi = static_cast<int>(receptor_y);
@@ -4139,9 +4923,19 @@ void GameWindow::RenderMeasureLines() {
 
     auto drawBeatLine = [&](double beat, uint8_t base_r, uint8_t base_g, uint8_t base_b, uint8_t base_a) {
         double y = NoteRenderer::GetYPosForBeat(beat, conductor_, cfg);
-        bool passed_receptor = cfg.downscroll ? (y > receptor_y) : (y < receptor_y);
-        int fl = GetFieldLeft();
-        int fr = GetFieldRight();
+        
+        // Apply speed curves to measure lines
+        if (mods.HasAnyEffect()) {
+            double raw_dist = y - receptor_y;
+            y = receptor_y + ApplyScrollCurves(mods, raw_dist, static_cast<double>(height_));
+        }
+
+        bool effectively_down = cfg.downscroll ^ (cfg.reverse_pct > 0.5);
+        bool passed_receptor = effectively_down ? (y > receptor_y) : (y < receptor_y);
+        
+        double tipsy_x = CalcTipsyOffset(mods.tipsy, play_time_, 0);
+        int fl = GetFieldLeft() + static_cast<int>(tipsy_x);
+        int fr = GetFieldRight() + static_cast<int>(tipsy_x);
 
         if (passed_receptor) {
             double beat_time = conductor_.BeatToTime(beat);
@@ -4222,30 +5016,52 @@ void GameWindow::RenderMeasureLines() {
     }
 }
 
-void GameWindow::RenderNotes() {
+void GameWindow::RenderNotes(const NoteFieldConfig& cfg, const ActiveMods& mods) {
     auto& ps = players_[render_player_idx_];
     const NoteChart* chart = ps.current_chart;
     if (!chart) return;
 
-    const auto& cfg = ps.field_config;
     auto [first, last] = NoteRenderer::GetVisibleNoteRange(
         *chart, conductor_, cfg, static_cast<double>(height_), 16.0);
 
     double current_beat = conductor_.GetCurrentBeat();
     double receptor_y = cfg.receptor_y;
 
-    // Helper to render a hold body
-    auto renderHoldBody = [&](int col, double head_beat, double tail_beat, NoteType type, size_t head_idx) {
-        double head_y = NoteRenderer::GetYPosForBeat(head_beat, conductor_, cfg);
-        double tail_y = NoteRenderer::GetYPosForBeat(tail_beat, conductor_, cfg);
-        
-        int x = GetLaneX(col);
-        int w = GetLaneWidth();
+    bool has_mods = mods.HasAnyEffect();
+    bool effectively_down = cfg.downscroll ^ (cfg.reverse_pct > 0.5);
+    bool blink_hidden = has_mods && CalcBlinkHidden(mods.blink, play_time_);
+    double mini_scale = has_mods ? CalcMiniScale(mods.mini) : 1.0;
 
-        bool head_hit = (ps.note_hit_masks[head_idx] & (1 << col)) != 0;
+    // Helper to render a hold body
+    auto renderHoldBody = [&](int col, const NoteRow& head_row, int tail_idx, NoteType type, size_t head_row_idx) {
+        if (tail_idx < 0 || tail_idx >= static_cast<int>(chart->note_rows.size())) return;
+        const auto& tail_row = chart->note_rows[tail_idx];
+
+        double head_y = NoteRenderer::GetYPosForRow(head_row, conductor_, cfg);
+        double tail_y = NoteRenderer::GetYPosForRow(tail_row, conductor_, cfg);
+        
+        if (has_mods) {
+            double h_dist = head_y - receptor_y;
+            head_y = receptor_y + ApplyScrollCurves(mods, h_dist, static_cast<double>(height_));
+            double t_dist = tail_y - receptor_y;
+            tail_y = receptor_y + ApplyScrollCurves(mods, t_dist, static_cast<double>(height_));
+        }
+
+        int x = GetLaneX(col);
+        if (has_mods) {
+            // Horizontal path offsets for hold body alignment
+            double h_off = CalcDrunkOffset(mods.drunk, head_row.beat, col, play_time_);
+            h_off += CalcTipsyOffset(mods.tipsy, play_time_, col);
+            h_off += CalcTornadoOffset(mods.tornado, head_y, receptor_y, col, chart->num_columns);
+            x += static_cast<int>(h_off);
+        }
+        int w = GetLaneWidth();
+        if (has_mods) w = static_cast<int>(w * mini_scale);
+
+        bool head_hit = (ps.note_hit_masks[head_row_idx] & (1 << col)) != 0;
         bool key_held = ps.input.GetLaneState(col).pressed;
-        bool head_passed = head_hit || (cfg.downscroll ? head_y > receptor_y : head_y < receptor_y);
-        bool tail_past_receptor = cfg.downscroll
+        bool head_passed = head_hit || (effectively_down ? head_y > receptor_y : head_y < receptor_y);
+        bool tail_past_receptor = effectively_down
             ? (tail_y > receptor_y)
             : (tail_y < receptor_y);
         bool hold_active = head_hit && key_held;
@@ -4263,7 +5079,7 @@ void GameWindow::RenderNotes() {
         // Clamp tail at receptor ONLY when hold is active
         double tail_render_y = tail_y;
         if (hold_active) {
-            if (cfg.downscroll) {
+            if (effectively_down) {
                 if (tail_y > receptor_y) tail_render_y = receptor_y;
             } else {
                 if (tail_y < receptor_y) tail_render_y = receptor_y;
@@ -4271,7 +5087,7 @@ void GameWindow::RenderNotes() {
         }
 
         int body_y_start, body_y_end;
-        if (cfg.downscroll) {
+        if (effectively_down) {
             body_y_start = static_cast<int>(tail_render_y);
             body_y_end = static_cast<int>(head_render_y);
         } else {
@@ -4338,12 +5154,12 @@ void GameWindow::RenderNotes() {
                 }
                 int cap_h = static_cast<int>(w * 0.5);
                 // Position cap at the END of the body, not centered on tail_y
-                int cap_y = cfg.downscroll
+                int cap_y = effectively_down
                     ? (static_cast<int>(tail_y) - cap_h)  // Above the body top
                     : static_cast<int>(tail_y);            // Below the body bottom
                 SDL_Rect cap_dst = { x, cap_y, w, cap_h };
-                // Cap points UP in downscroll, DOWN in upscroll
-                SDL_RendererFlip flip = cfg.downscroll ? SDL_FLIP_VERTICAL : SDL_FLIP_NONE;
+                // Cap points UP in downscroll (effectively), DOWN in upscroll
+                SDL_RendererFlip flip = effectively_down ? SDL_FLIP_VERTICAL : SDL_FLIP_NONE;
                 SDL_RenderCopyEx(renderer_, cap_tex, nullptr, &cap_dst, 0.0, nullptr, flip);
                 
                 // Reset color mod
@@ -4355,19 +5171,17 @@ void GameWindow::RenderNotes() {
     // 1. Scan for active holds that started BEFORE 'first'
     for (int col = 0; col < chart->num_columns; ++col) {
         for (int j = static_cast<int>(first) - 1; j >= 0; --j) {
-            NoteType nt = chart->note_rows[j].columns[col];
+            const auto& row = chart->note_rows[j];
+            NoteType nt = row.columns[col];
             if (nt == NoteType::HoldHead || nt == NoteType::RollHead) {
-                // Find tail
-                double tail_beat = -1.0;
-                for (size_t k = j + 1; k < chart->note_rows.size(); ++k) {
-                    if (col < (int)chart->note_rows[k].columns.size() &&
-                        chart->note_rows[k].columns[col] == NoteType::HoldTail) {
-                        tail_beat = chart->note_rows[k].beat;
-                        break;
+                int tail_idx = row.tail_row_indices[col];
+                if (tail_idx >= 0) {
+                    const auto& tail_row = chart->note_rows[tail_idx];
+                    // Keep rendering if tail is visible or hasn't been passed by receptor
+                    double tail_vpos = tail_row.visual_pos;
+                    if (tail_row.beat > current_beat - 4.0) { 
+                        renderHoldBody(col, row, tail_idx, nt, j);
                     }
-                }
-                if (tail_beat > current_beat - 4.0) { // Keep rendering a bit after tail passes
-                    renderHoldBody(col, chart->note_rows[j].beat, tail_beat, nt, j);
                 }
                 break;
             }
@@ -4378,8 +5192,14 @@ void GameWindow::RenderNotes() {
     // 2. Render visible notes and their hold bodies
     for (size_t i = first; i < last; ++i) {
         const auto& row = chart->note_rows[i];
-        double y = NoteRenderer::GetYPosForBeat(row.beat, conductor_, cfg);
-        
+        double y = NoteRenderer::GetYPosForRow(row, conductor_, cfg);
+
+        // Apply Beat: vertical bounce
+        double beat_y_offset = 0.0;
+        if (has_mods && mods.beat != 0.0) {
+            beat_y_offset = CalcBeatOffset(mods.beat, row.beat, current_beat);
+        }
+
         for (int col = 0; col < static_cast<int>(row.columns.size()); ++col) {
             NoteType type = row.columns[static_cast<size_t>(col)];
             if (type == NoteType::None) continue;
@@ -4390,35 +5210,96 @@ void GameWindow::RenderNotes() {
             // Skip non-head notes that were already hit
             if (!is_head && hit) continue;
 
-            // For hold/roll heads, find the tail beat
-            double tail_beat = -1.0;
-            if (is_head) {
-                for (size_t j = i + 1; j < chart->note_rows.size(); ++j) {
-                    if (col < (int)chart->note_rows[j].columns.size() &&
-                        chart->note_rows[j].columns[col] == NoteType::HoldTail) {
-                        tail_beat = chart->note_rows[j].beat;
-                        break;
-                    }
-                }
+            // Blink: hide notes periodically
+            if (blink_hidden && type != NoteType::Mine) continue;
 
-                // Draw body FIRST (behind the head)
-                if (tail_beat > 0.0) {
-                    renderHoldBody(col, row.beat, tail_beat, type, i);
+            // For hold/roll heads, find the tail beat
+            // For hold/roll heads, use pre-calculated tail info
+            if (is_head) {
+
+                int tail_idx = row.tail_row_indices[col];
+                if (tail_idx >= 0) {
+                    renderHoldBody(col, row, tail_idx, type, i);
                 }
             }
+
+            // Per-note modifier calculations
+            double note_x_offset = 0.0;
+            double note_scale = mini_scale;
+            double note_extra_angle = 0.0;
+            double note_alpha = 1.0;
+            double note_y_offset = beat_y_offset;
+
+            if (has_mods) {
+                // Horizontal Offsets
+                note_x_offset = CalcDrunkOffset(mods.drunk, row.beat, col, play_time_);
+                note_x_offset += CalcTipsyOffset(mods.tipsy, play_time_, col);
+                note_x_offset += CalcTornadoOffset(mods.tornado, y, receptor_y, col, chart->num_columns);
+
+                // Rotations
+                note_extra_angle = CalcDizzyAngle(mods.dizzy, y, receptor_y);
+                note_extra_angle += CalcConfusionAngle(mods.confusion);
+
+                // Vertical Offsets
+                note_y_offset += CalcBumpyOffset(mods.bumpy, row.beat);
+
+                // Speed Curves (Apply to distance from receptor)
+                double raw_dist = y - receptor_y;
+                double curved_dist = ApplyScrollCurves(mods, raw_dist, static_cast<double>(height_));
+                y = receptor_y + curved_dist;
+
+                // Visibility
+                note_alpha = CalcVisibilityAlpha(mods, y, receptor_y, static_cast<double>(height_), cfg.downscroll);
+            }
+
+            double final_y = y + note_y_offset;
 
             // Draw the note head (on top of body)
             if (type != NoteType::HoldTail) {
                 if (is_head && hit) {
                     // Hold/roll head stays at receptor while key is held or tail hasn't passed
-                    double tail_time = (tail_beat > 0.0) ? conductor_.BeatToTime(tail_beat) : 0.0;
+                    int tail_idx = row.tail_row_indices[col];
+                    double tail_time = (tail_idx >= 0) ? chart->note_rows[tail_idx].time : 0.0;
                     bool key_held = ps.input.GetLaneState(col).pressed;
-                    bool tail_still_active = (tail_beat > 0.0) && (play_time_ < tail_time);
+                    bool tail_still_active = (tail_idx >= 0) && (play_time_ < tail_time);
+                    
                     if (key_held || tail_still_active) {
-                        DrawNote(col, static_cast<int>(receptor_y), row.beat, type);
+                        DrawNote(col, receptor_y, row.beat, type, note_x_offset, note_scale, note_extra_angle, note_alpha);
+                        
+                        // Roll Tick Meter
+                        if (type == NoteType::RollHead) {
+                            // Find corresponding ActiveHold
+                            for (const auto& ah : ps.active_holds) {
+                                if (ah.row_index == i && ah.col_index == col) {
+                                    int x = GetLaneX(col);
+                                    int lw = GetLaneWidth();
+                                    int my = static_cast<int>(receptor_y + (cfg.downscroll ? 40 : -40));
+                                    
+                                    // Progress bar dimensions
+                                    int bw = lw - 10;
+                                    int bh = 6;
+                                    
+                                    // Hit percentage
+                                    double hit_pct = (ah.required_ticks > 0) ? (double)ah.ticks_hit / ah.required_ticks : 1.0;
+                                    hit_pct = std::clamp(hit_pct, 0.0, 1.0);
+                                    
+                                    // Outer frame
+                                    DrawRect(x + 5, my, bw, bh, {0,0,0,180});
+                                    DrawRectOutline(x + 5, my, bw, bh, {150,150,150,255});
+                                    
+                                    // Inner fill (Color shifts Green -> Yellow -> Red if dropping behind)
+                                    Color pcol = {100, 255, 100, 255};
+                                    if (hit_pct < 0.4) pcol = {255, 50, 50, 255};
+                                    else if (hit_pct < 0.8) pcol = {255, 255, 100, 255};
+                                    
+                                    DrawRect(x + 6, my + 1, (int)((bw - 2) * hit_pct), bh - 2, pcol);
+                                    break;
+                                }
+                            }
+                        }
                     }
                 } else {
-                    DrawNote(col, static_cast<int>(y), row.beat, type);
+                    DrawNote(col, final_y, row.beat, type, note_x_offset, note_scale, note_extra_angle, note_alpha);
                 }
             }
         }
@@ -4434,6 +5315,13 @@ void GameWindow::RenderHUD() {
     std::snprintf(bpm_buf, sizeof(bpm_buf), "%.1f", conductor_.GetCurrentBPM());
     font_.DrawText(renderer_, width_ / 2, 10, "BPM", {150, 150, 180, 255}, FontSize::SMALL, TextAlign::CENTER);
     font_.DrawText(renderer_, width_ / 2, 28, bpm_buf, {255, 255, 255, 255}, FontSize::MEDIUM, TextAlign::CENTER);
+
+    // Autoplay indicator
+    if (autoplay_) {
+        double pulse = 0.7 + 0.3 * std::sin(global_anim_timer_ * 4.0);
+        uint8_t a = static_cast<uint8_t>(255 * pulse);
+        font_.DrawText(renderer_, width_ / 2, 78, "AUTOPLAY", {255, 180, 50, a}, FontSize::SMALL, TextAlign::CENTER);
+    }
 
     for (int p = 0; p < MAX_PLAYERS; ++p) {
         if (players_[p].joined) {
@@ -4494,14 +5382,23 @@ void GameWindow::RenderHUD() {
 
 void GameWindow::RenderPlayerTopHUD(int p) {
     auto& ps = players_[p];
-    if (!ps.current_chart) return;
+    if (!ps.current_chart || ps.failed_sequence) return;
 
     TextAlign align = (p == 0) ? TextAlign::LEFT : TextAlign::RIGHT;
-    int field_edge = (p == 0) ? GetLaneX(0) : GetLaneX(ps.current_chart->num_columns - 1) + GetLaneWidth();
     
-    // In Double/Routine, if it's centered, adjust alignment edge?
-    // User requested "correctly aligned to the right side of the screen" for P2.
-    int anchor_x = (p == 0) ? 15 : width_ - 15;
+    // Align to the sides of the note field
+    int anchor_x = 0;
+    if (p == 0) {
+        // P1: Left side of P1's field
+        render_player_idx_ = 0;
+        render_x_offset_ = ps.field_x_offset;
+        anchor_x = GetFieldLeft() - 10; 
+    } else {
+        // P2: Right side of P2's field
+        render_player_idx_ = 1;
+        render_x_offset_ = ps.field_x_offset;
+        anchor_x = GetFieldRight() + 10;
+    }
 
     int icon_y = 55;
     int acc_y = 85;
@@ -4512,11 +5409,38 @@ void GameWindow::RenderPlayerTopHUD(int p) {
     std::snprintf(speed_buf, sizeof(speed_buf), "x%.2f", ps.field_config.speed_mod);
     mods.push_back(speed_buf);
     mods.push_back(ps.field_config.downscroll ? "DOWN" : "UP");
-    if (ps.current_chart) mods.push_back(ps.current_chart->difficulty_name);
     if (ex_mode_) mods.push_back("EX");
 
-    int icon_spacing = 8;
+    // Difficulty / Meter
+    std::string diff_name = ps.current_chart->difficulty_name;
+    std::transform(diff_name.begin(), diff_name.end(), diff_name.begin(), ::toupper);
+    
+    std::string meter_str = FormatMeter(ps.current_chart->custom_difficulty);
+    Color diff_col = GetDifficultyColor(ps.current_chart->difficulty_name);
+    
+    int meter_y = icon_y - 25;
+    if (ps.current_chart->variant == ChartVariant::Wild) {
+        std::string wild_text = "WILD";
+        if (!ps.current_chart->variant_kanji.empty()) wild_text = ps.current_chart->variant_kanji;
+        font_.DrawText(renderer_, anchor_x, meter_y, wild_text, diff_col, FontSize::MEDIUM, align);
+        int tw = font_.GetTextWidth(wild_text, FontSize::MEDIUM);
+        int mx = (p == 0) ? anchor_x + tw + 10 : anchor_x - tw - 10;
+        font_.DrawText(renderer_, mx, meter_y + 4, meter_str, {255, 255, 255, 255}, FontSize::SMALL, align);
+    } else {
+        // Draw Mode + Difficulty Name + Meter
+        std::string mode_name = GetChartModeName(ps.current_chart->chart_type);
+        bool is_routine = (ps.current_chart->chart_type == "dance-routine" || ps.current_chart->chart_type == "dance-couple");
+        
+        std::string full_diff;
+        if (is_routine) full_diff = mode_name + " " + meter_str;
+        else if (ps.current_chart->chart_type == "dance-double") full_diff = "DOUBLE " + diff_name + " " + meter_str;
+        else full_diff = diff_name + " " + meter_str;
+
+        font_.DrawText(renderer_, anchor_x, meter_y, full_diff, diff_col, FontSize::MEDIUM, align);
+    }
+
     int cur_x = anchor_x;
+    int icon_spacing = 8;
     
     for (size_t i = 0; i < mods.size(); ++i) {
         int tw = font_.GetTextWidth(mods[i], FontSize::SMALL);
@@ -4606,24 +5530,249 @@ void GameWindow::RenderPlayerLifeBar(int p) {
 
     // Background/Frame
     DrawRect(bar_x - 2, bar_y - 2, bar_w + 4, bar_h + 4, {10, 10, 20, 180});
-    DrawRectOutline(bar_x - 3, bar_y - 3, bar_w + 6, bar_h + 6, {60, 60, 100, 255});
+    // Top and bottom borders only
+    DrawRect(bar_x - 3, bar_y - 3, bar_w + 6, 2, {60, 60, 100, 255});
+    DrawRect(bar_x - 3, bar_y + bar_h + 1, bar_w + 6, 2, {60, 60, 100, 255});
 
     float life = ps.life_meter.GetLife();
-    int fill_h = static_cast<int>(bar_h * life);
-    
-    // Bottom-to-top gradient
-    for (int i = 0; i < fill_h; ++i) {
-        float t = static_cast<float>(i) / bar_h;
-        Color c;
-        if (t < 0.5f) {
-            float m = t * 2.0f;
-            c = {static_cast<uint8_t>(50+205*m), static_cast<uint8_t>(255-55*m), static_cast<uint8_t>(100-50*m), 255};
+    LifeType type = ps.life_meter.GetType();
+
+    if (type == LifeType::STANDARD) {
+        int num_segments = 20;
+        int active_segments = static_cast<int>(std::ceil(life * num_segments));
+        int gap = 2;
+
+        Color base_c;
+        if (life < 0.5f) {
+            float m = life * 2.0f;
+            base_c = {255, static_cast<uint8_t>(255 * m), 50, 255};
         } else {
-            float m = (t-0.5f)*2.0f;
-            c = {255, static_cast<uint8_t>(200-150*m), 50, 255};
+            float m = (life - 0.5f) * 2.0f;
+            base_c = {static_cast<uint8_t>(255 * (1.0f - m)), 255, 50, 255};
         }
-        SDL_SetRenderDrawColor(renderer_, c.r, c.g, c.b, 255);
-        SDL_RenderDrawLine(renderer_, bar_x, bar_y + bar_h - i, bar_x + bar_w - 1, bar_y + bar_h - i);
+
+        for (int i = 0; i < num_segments; ++i) {
+            int bottom_y = bar_y + bar_h - static_cast<int>((bar_h * i) / num_segments);
+            int top_y = bar_y + bar_h - static_cast<int>((bar_h * (i + 1)) / num_segments) + gap;
+            int sh = bottom_y - top_y;
+            
+            double flash = ps.segment_flash_timers[i];
+            
+            int offset_x = 0;
+            int offset_y = 0;
+            if (flash > 0.0 && i < active_segments) {
+                // Snap in with acceleration
+                int dir = (i % 2 == 0) ? -1 : 1;
+                offset_x = static_cast<int>(dir * (flash * flash) * bar_w * 3);
+            } else if (flash < 0.0 && i >= active_segments) {
+                // Fall out realistically
+                double f = -flash; 
+                double t = 1.0 - f;
+                int dir = (i % 2 == 0) ? -1 : 1;
+                offset_x = static_cast<int>(dir * t * bar_w * 2);
+                offset_y = static_cast<int>(t * t * 60);
+            }
+            int draw_x = bar_x + offset_x;
+            int draw_y = top_y + offset_y;
+            
+            if (i >= active_segments) {
+                // Drawn beneath moving pieces
+                DrawRect(bar_x, top_y, bar_w, sh, {40, 40, 40, 150});
+            }
+            
+            if (i < active_segments) {
+                Color c = base_c;
+                if (flash > 0.0) {
+                    c.r = static_cast<uint8_t>(c.r + (255 - c.r) * flash);
+                    c.g = static_cast<uint8_t>(c.g + (255 - c.g) * flash);
+                    c.b = static_cast<uint8_t>(c.b + (255 - c.b) * flash);
+                }
+                DrawRect(draw_x, draw_y, bar_w, sh, c);
+            } else if (flash < 0.0) {
+                double f = -flash;
+                DrawRect(draw_x, draw_y, bar_w, sh, {255, static_cast<uint8_t>(50 * f), static_cast<uint8_t>(50 * f), static_cast<uint8_t>(150 + 105 * f)});
+            }
+        }
+    } else if (type == LifeType::LIFE4 || type == LifeType::RISKY) {
+        int total_lives = (type == LifeType::LIFE4) ? 4 : 1;
+        int active_lives = ps.life_meter.GetBatteryLives();
+        int gap = 4;
+        
+        for (int i = 0; i < total_lives; ++i) {
+            int bottom_y = bar_y + bar_h - static_cast<int>((bar_h * i) / total_lives);
+            int top_y = bar_y + bar_h - static_cast<int>((bar_h * (i + 1)) / total_lives) + gap;
+            int sh = bottom_y - top_y;
+
+            double flash = ps.battery_flash_timers[i];
+
+            int offset_x = 0;
+            int offset_y = 0;
+            if (flash > 0.0 && i < active_lives) {
+                int dir = (i % 2 == 0) ? -1 : 1;
+                offset_x = static_cast<int>(dir * (flash * flash) * bar_w * 3);
+            } else if (flash < 0.0 && i >= active_lives) {
+                double f = -flash;
+                double t = 1.0 - f;
+                int dir = (i % 2 == 0) ? -1 : 1;
+                offset_x = static_cast<int>(dir * t * bar_w * 2);
+                offset_y = static_cast<int>(t * t * 60);
+            }
+            int draw_x = bar_x + offset_x;
+            int draw_y = top_y + offset_y;
+
+            if (i >= active_lives && !(type == LifeType::RISKY && ps.shatter_state == ShatterState::SHATTERING)) {
+                // Background dead hole (hidden during shattering)
+                DrawRect(bar_x, top_y, bar_w, sh, {40, 0, 0, 150});
+                DrawRectOutline(bar_x, top_y, bar_w, sh, {80, 20, 20, 255});
+            }
+
+            if (i < active_lives) {
+                Color base, out, in_c;
+                if (type == LifeType::RISKY) {
+                    // Pulsing white for RISKY
+                    double pulse = 0.5 + 0.5 * std::sin(play_time_ * 6.0);
+                    uint8_t wb = static_cast<uint8_t>(180 + 75 * pulse);
+                    base = {wb, wb, wb, 255};
+                    out  = {255, 255, 255, 255};
+                    in_c = {255, 255, 255, static_cast<uint8_t>(180 + 75 * pulse)};
+                } else {
+                    // Cycling colors for LIFE4 segments
+                    double phase = play_time_ * 1.5 + i * 0.8;
+                    uint8_t cr = static_cast<uint8_t>(std::sin(phase) * 80 + 175);
+                    uint8_t cg = static_cast<uint8_t>(std::sin(phase + 2.1) * 80 + 120);
+                    uint8_t cb = static_cast<uint8_t>(std::sin(phase + 4.2) * 80 + 120);
+                    base = {cr, cg, cb, 255};
+                    out  = {static_cast<uint8_t>(std::min(255, cr + 60)), static_cast<uint8_t>(std::min(255, cg + 60)), static_cast<uint8_t>(std::min(255, cb + 60)), 255};
+                    in_c = {static_cast<uint8_t>(std::min(255, cr + 40)), static_cast<uint8_t>(std::min(255, cg + 40)), static_cast<uint8_t>(std::min(255, cb + 40)), 255};
+                }
+                if (flash > 0.0) {
+                    base = {255, static_cast<uint8_t>(std::min(255.0, base.g + 195.0 * flash)), static_cast<uint8_t>(std::min(255.0, base.b + 195.0 * flash)), 255};
+                    out = {255, 255, 255, 255};
+                    in_c = {255, 255, 255, 255};
+                }
+                DrawRect(draw_x, draw_y, bar_w, sh, base);
+                DrawRectOutline(draw_x, draw_y, bar_w, sh, out);
+                DrawRect(draw_x + 2, draw_y + 2, bar_w - 4, sh / 3, in_c);
+            } else if (flash < 0.0) {
+                double f = -flash;
+                DrawRect(draw_x, draw_y, bar_w, sh, {static_cast<uint8_t>(255 * f), 0, 0, static_cast<uint8_t>(150 + 105 * f)});
+                DrawRectOutline(draw_x, draw_y, bar_w, sh, {static_cast<uint8_t>(255 * f), static_cast<uint8_t>(50 * f), static_cast<uint8_t>(50 * f), static_cast<uint8_t>(255 * f)});
+            }
+        }
+
+        // --- RISKY Shatter Particle Rendering ---
+        if (type == LifeType::RISKY && !ps.shatter_particles.empty()) {
+            for (const auto& sp : ps.shatter_particles) {
+                if (sp.alpha <= 0.0f) continue;
+                uint8_t a = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, sp.alpha)));
+                // Draw triangular polygon shard at particle position with rotation
+                float cx = sp.x + sp.w * 0.5f;
+                float cy = sp.y + sp.h * 0.5f;
+                float cosR = std::cos(sp.rot);
+                float sinR = std::sin(sp.rot);
+                // Three vertices of a spiky triangle shard
+                float pts[3][2] = {
+                    { -sp.w * 0.5f, -sp.h * 0.6f },
+                    {  sp.w * 0.5f,  0.0f },
+                    { -sp.w * 0.3f,  sp.h * 0.6f }
+                };
+                SDL_Vertex verts[3];
+                for (int v = 0; v < 3; ++v) {
+                    float rx = pts[v][0] * cosR - pts[v][1] * sinR + cx;
+                    float ry = pts[v][0] * sinR + pts[v][1] * cosR + cy;
+                    verts[v].position = {rx, ry};
+                    verts[v].color = {sp.c.r, sp.c.g, sp.c.b, a};
+                    verts[v].tex_coord = {0.0f, 0.0f};
+                }
+                SDL_RenderGeometry(renderer_, nullptr, verts, 3, nullptr, 0);
+            }
+        }
+
+        // --- RISKY Cracking Overlay ---
+        if (type == LifeType::RISKY && ps.shatter_state == ShatterState::CRACKING) {
+            int bottom_y = bar_y + bar_h;
+            int top_y_slot = bar_y + gap;
+            int sh_slot = bottom_y - top_y_slot;
+            // Flash red overlay
+            double blink = 0.5 + 0.5 * std::sin(ps.shatter_timer * 14.0);
+            DrawRect(bar_x, top_y_slot, bar_w, sh_slot, {255, 0, 0, static_cast<uint8_t>(120 * blink)});
+            // Growing crack network - opacity and extent increase over time
+            double crack_progress = std::min(1.0, ps.shatter_timer / 1.2);
+            uint8_t crack_alpha = static_cast<uint8_t>(220 * crack_progress);
+            int cx = bar_x + bar_w / 2;
+            int cy = bar_y + bar_h / 2;
+            auto drawCrack = [&](int x1, int y1, int x2, int y2) {
+                SDL_SetRenderDrawColor(renderer_, 20, 0, 0, crack_alpha);
+                SDL_RenderDrawLine(renderer_, x1, y1, x2, y2);
+                SDL_SetRenderDrawColor(renderer_, 255, 255, 255, static_cast<uint8_t>(crack_alpha * 0.7));
+                SDL_RenderDrawLine(renderer_, x1 + 1, y1, x2 + 1, y2);
+            };
+            // Main vertical crack
+            drawCrack(cx - 1, top_y_slot + static_cast<int>(sh_slot * 0.1), cx + 1, cy);
+            drawCrack(cx + 1, cy, cx - 2, top_y_slot + static_cast<int>(sh_slot * 0.85));
+            // Branches (appear progressively)
+            if (crack_progress > 0.3) {
+                drawCrack(cx, cy - sh_slot / 5, cx + bar_w / 3, cy - sh_slot / 8);
+                drawCrack(cx, cy + sh_slot / 6, cx - bar_w / 3, cy + sh_slot / 4);
+            }
+            if (crack_progress > 0.6) {
+                drawCrack(cx - 1, cy - sh_slot / 3, cx - bar_w / 3, cy - sh_slot / 2);
+                drawCrack(cx + 1, cy + sh_slot / 3, cx + bar_w / 4, cy + sh_slot / 2);
+                drawCrack(cx, top_y_slot + static_cast<int>(sh_slot * 0.2), cx + bar_w / 4, top_y_slot + static_cast<int>(sh_slot * 0.1));
+            }
+            if (crack_progress > 0.85) {
+                drawCrack(cx - 2, cy, cx - bar_w / 2, cy + sh_slot / 6);
+                drawCrack(cx + 2, cy - sh_slot / 4, cx + bar_w / 2, cy - sh_slot / 3);
+            }
+        }
+    } else if (type == LifeType::FLARE) {
+        int fill_h = static_cast<int>(bar_h * life);
+        int flare = ps.life_meter.GetFlareLevel();
+        
+        int trail_h = static_cast<int>(bar_h * ps.displayed_life);
+        if (trail_h > fill_h) {
+            DrawRect(bar_x, bar_y + bar_h - trail_h, bar_w, trail_h - fill_h, {255, 255, 255, 200});
+        }
+        
+        for (int i = 0; i < fill_h; ++i) {
+            float t = static_cast<float>(i) / bar_h;
+            Color c;
+            
+            Color flare_color;
+            if (flare == 1) {
+                flare_color = {255, 200, 50, 255}; // Yellow
+            } else if (flare == 2) {
+                flare_color = {255, 100, 50, 255}; // Orange
+            } else if (flare == 3) {
+                flare_color = {255, 50, 50, 255};  // Red
+            } else if (flare == 4) {
+                flare_color = {200, 50, 255, 255}; // Purple
+            }
+            
+            if (flare <= 4) {
+                // Gradient from White at top (t=1) to Flare Color at bottom (t=0)
+                c.r = static_cast<uint8_t>(flare_color.r + (255 - flare_color.r) * t);
+                c.g = static_cast<uint8_t>(flare_color.g + (255 - flare_color.g) * t);
+                c.b = static_cast<uint8_t>(flare_color.b + (255 - flare_color.b) * t);
+                c.a = 255;
+            } else {
+                double rb = t + play_time_ * 2.0;
+                c = {
+                    static_cast<uint8_t>(std::sin(rb * 6.28) * 127 + 128),
+                    static_cast<uint8_t>(std::sin((rb + 0.33) * 6.28) * 127 + 128),
+                    static_cast<uint8_t>(std::sin((rb + 0.66) * 6.28) * 127 + 128),
+                    255
+                };
+            }
+            if (ps.flare_flash_timer > 0.0) {
+                double f = ps.flare_flash_timer;
+                c.r = static_cast<uint8_t>(c.r + (255 - c.r) * f);
+                c.g = static_cast<uint8_t>(c.g + (255 - c.g) * f);
+                c.b = static_cast<uint8_t>(c.b + (200 - c.b) * f);
+            }
+            SDL_SetRenderDrawColor(renderer_, c.r, c.g, c.b, 255);
+            SDL_RenderDrawLine(renderer_, bar_x, bar_y + bar_h - i, bar_x + bar_w - 1, bar_y + bar_h - i);
+        }
     }
 }
 
@@ -4696,21 +5845,34 @@ Color GameWindow::GetClearTypeColor(ClearType ct) {
     }
 }
 
-void GameWindow::DrawNote(int lane, double y, double beat, NoteType type) {
-    int x = GetLaneX(lane);
-    int w = GetLaneWidth();
+void GameWindow::DrawNote(int lane, double y, double beat, NoteType type,
+                          double x_offset, double scale, double extra_angle,
+                          double alpha) {
+    int x = GetLaneX(lane) + static_cast<int>(x_offset);
+    int w = static_cast<int>(GetLaneWidth() * scale);
     int yi = static_cast<int>(y);
     
+    // Center the scaled note on the lane
+    if (scale != 1.0) {
+        int orig_w = GetLaneWidth();
+        x = GetLaneX(lane) + static_cast<int>(x_offset) + (orig_w - w) / 2;
+    }
+    
+    uint8_t a8 = static_cast<uint8_t>(255 * std::clamp(alpha, 0.0, 1.0));
+
     // --- Mine: use mine texture with spinning rotation ---
     if (type == NoteType::Mine) {
         if (mine_texture_) {
-            double scale = static_cast<double>(w) / mine_tex_w_;
-            int dh = static_cast<int>(mine_tex_h_ * scale);
+            double s = static_cast<double>(w) / mine_tex_w_;
+            int dh = static_cast<int>(mine_tex_h_ * s);
             SDL_Rect mdst = { x, yi - dh / 2, w, dh };
+            SDL_SetTextureAlphaMod(mine_texture_, a8);
             SDL_RenderCopyEx(renderer_, mine_texture_, nullptr, &mdst, play_time_ * 360.0, nullptr, SDL_FLIP_NONE);
+            SDL_SetTextureAlphaMod(mine_texture_, 255);
         } else {
             // Fallback: draw X with rectangle outline
             Color color = LaneColors::MINE;
+            color.a = a8;
             int half = w / 2;
             int cx = x + half;
             SDL_SetRenderDrawColor(renderer_, color.r, color.g, color.b, color.a);
@@ -4730,28 +5892,26 @@ void GameWindow::DrawNote(int lane, double y, double beat, NoteType type) {
         if (type == NoteType::TapP1) qrow = 0;
         else if (type == NoteType::TapP2) qrow = 1;
         else if (current_chart_ && (current_chart_->chart_type == "dance-routine" || current_chart_->chart_type == "dance-couple")) {
-            qrow = (lane < 4) ? 0 : 1; // P1: 4th (Red), P2: 8th (Blue) fallback
+            qrow = (lane < 4) ? 0 : 1; 
         }
 
-        int frame = static_cast<int>(play_time_ * 20.0) % 16; // 20fps animation
-        
+        int frame = static_cast<int>(play_time_ * 20.0) % 16; 
         int fw = note_tex_w_ / 16;
         int fh = note_tex_h_ / 8;
-        
         SDL_Rect src = { frame * fw, qrow * fh, fw, fh };
-        
-        double scale = static_cast<double>(w) / fw;
-        int dh = static_cast<int>(fh * scale);
+        double s = static_cast<double>(w) / fw;
+        int dh = static_cast<int>(fh * s);
         
         // Centering: align the vertical middle of the note to 'yi'
         SDL_Rect dst = { x, yi - dh / 2, w, dh };
         
         double angle = 0.0;
-        if (lane == 0) angle = 90.0;       // Left
-        else if (lane == 1) angle = 0.0;   // Down
-        else if (lane == 2) angle = 180.0; // Up
-        else if (lane == 3) angle = -90.0; // Right
-        
+        int rot_lane = lane % 4;
+        if (rot_lane == 0) angle = 90.0;       // Left
+        else if (rot_lane == 1) angle = 0.0;   // Down
+        else if (rot_lane == 2) angle = 180.0; // Up
+        else if (rot_lane == 3) angle = -90.0; // Right
+        angle += extra_angle; // Apply modifier rotation (Dizzy)
         // --- Lift: use lift texture (1x8 sprite sheet 窶・1 column, 8 quantization rows) ---
         if (type == NoteType::Lift) {
             if (lift_texture_) {
@@ -4765,25 +5925,29 @@ void GameWindow::DrawNote(int lane, double y, double beat, NoteType type) {
                 double lscale = static_cast<double>(w) / lfw;
                 int ldh = static_cast<int>(lfh * lscale);
                 SDL_Rect ldst = { x, yi - ldh / 2, w, ldh };
+                SDL_SetTextureAlphaMod(lift_texture_, a8);
                 SDL_RenderCopyEx(renderer_, lift_texture_, &lsrc, &ldst, angle, nullptr, SDL_FLIP_NONE);
+                SDL_SetTextureAlphaMod(lift_texture_, 255);
                 return;
             }
             // Fallback: tint the regular note texture
             SDL_SetTextureColorMod(note_texture_, 100, 255, 255);
         } else if (type == NoteType::Fake) {
-            // Fakes are semi-transparent
-            SDL_SetTextureAlphaMod(note_texture_, 128);
+            // Fakes are semi-transparent (multiply with modifier alpha)
+            a8 = static_cast<uint8_t>(a8 * 0.5);
         }
 
+        SDL_SetTextureAlphaMod(note_texture_, a8);
         SDL_RenderCopyEx(renderer_, note_texture_, &src, &dst, angle, nullptr, SDL_FLIP_NONE);
+        SDL_SetTextureAlphaMod(note_texture_, 255);
 
         // Reset mods
-        if (type == NoteType::Fake) SDL_SetTextureAlphaMod(note_texture_, 255);
         if (type == NoteType::Lift) SDL_SetTextureColorMod(note_texture_, 255, 255, 255);
-
+        return;
     } else {
         // Fallback to rectangle drawing if texture failed to load
         Color color = GetNoteColor(beat);
+        color.a = a8;
         if (type == NoteType::TapP1) color = LaneColors::QUARTER;
         else if (type == NoteType::TapP2) color = LaneColors::EIGHTH;
         else if (current_chart_ && (current_chart_->chart_type == "dance-routine" || current_chart_->chart_type == "dance-couple")) {
@@ -4980,6 +6144,7 @@ void GameWindow::SaveSettings() {
     std::fprintf(f, "fullscreen=%d\n", fullscreen_ ? 1 : 0);
     std::fprintf(f, "audio_offset=%.4f\n", audio_offset_);
     std::fprintf(f, "center_1p=%d\n", center_1p_ ? 1 : 0);
+    std::fprintf(f, "ex_mode=%d\n", ex_mode_ ? 1 : 0);
     
     for (int p = 0; p < 2; ++p) {
         for (int l = 0; l < 6; ++l) {
@@ -4997,8 +6162,21 @@ void GameWindow::SaveSettings() {
 }
 
 void GameWindow::LoadSettings() {
+    // Default values if settings.cfg is missing
+    field_config_.speed_mod = 2.0;
+    field_config_.mod_type  = ScrollModType::XMod;
+    field_config_.downscroll = false;
+    center_1p_ = false;
+    audio_offset_ = 0.0;
+    ex_mode_ = false;
+
     std::FILE* f = std::fopen("settings.cfg", "r");
-    if (!f) return;
+    if (!f) {
+        // Apply defaults even if no file exists
+        field_config_.receptor_y = height_ * 0.15;
+        ApplyInputBindings();
+        return;
+    }
     char line[128];
     while (std::fgets(line, sizeof(line), f)) {
         char key[64], val[64];
@@ -5010,6 +6188,7 @@ void GameWindow::LoadSettings() {
             else if (skey == "fullscreen") fullscreen_ = (std::atoi(val) != 0);
             else if (skey == "audio_offset") audio_offset_ = std::atof(val);
             else if (skey == "center_1p") center_1p_ = (std::atoi(val) != 0);
+            else if (skey == "ex_mode") ex_mode_ = (std::atoi(val) != 0);
             else if (skey.find("bind_p") == 0) {
                 // Format: bind_p{1,2}_{action}_{slot}_type or id
                 int p = -1, l = -1, s = -1;
@@ -5044,24 +6223,37 @@ void GameWindow::ApplyInputBindings() {
     for (int p = 0; p < MAX_PLAYERS; ++p) {
         players_[p].input.ConfigureForPlayer(chart_type, num_cols, p);
 
-        std::vector<KeyBinding> kb;
-        std::unordered_map<SDL_GameControllerButton, int> bb;
-
         // Custom binds index 4=Start, 5=Select
         for (int action = 0; action < 6; ++action) {
             int virtual_col = (action < 4) ? action : (action == 4 ? InputMapper::COL_START : InputMapper::COL_SELECT);
 
+            bool has_custom = false;
             for (int s = 0; s < 3; ++s) {
-                const auto& b = custom_binds_[p][action][s];
-                if (b.type == BindInfo::KEY) {
-                    kb.push_back({ (SDL_Keycode)b.id, virtual_col });
-                } else if (b.type == BindInfo::BUTTON) {
-                    bb[(SDL_GameControllerButton)b.id] = virtual_col;
+                if (custom_binds_[p][action][s].type != BindInfo::NONE) {
+                    has_custom = true;
+                    break;
+                }
+            }
+
+            if (has_custom) {
+                // Wipe defaults ONLY for this specific action if custom binds exist
+                players_[p].input.ClearBindingsForColumn(virtual_col);
+
+                for (int s = 0; s < 3; ++s) {
+                    const auto& b = custom_binds_[p][action][s];
+                    if (b.type == BindInfo::KEY) {
+                        players_[p].input.AddBinding({ (SDL_Keycode)b.id, virtual_col });
+                    } else if (b.type == BindInfo::BUTTON) {
+                        // For now we don't have an AddButtonBinding but we can add it if needed
+                        // or just use a local map. Since Select/Start are usually keys, this fix
+                        // primarily targets the reported issue.
+                        std::unordered_map<SDL_GameControllerButton, int> bb;
+                        bb[(SDL_GameControllerButton)b.id] = virtual_col;
+                        players_[p].input.SetButtonBindings(bb);
+                    }
                 }
             }
         }
-        if (!kb.empty()) players_[p].input.SetBindings(kb);
-        if (!bb.empty()) players_[p].input.SetButtonBindings(bb);
     }
 }
 
@@ -5120,9 +6312,10 @@ int GameWindow::GetFieldRight() const {
 }
 
 int GameWindow::GetLaneX(int lane) const {
+    auto& ps = players_[render_player_idx_];
     int actual_lane = lane;
-    if (effect_mode_ == 1 && current_chart_) { // Mirror
-        actual_lane = current_chart_->num_columns - 1 - lane;
+    if (ps.effect_mode == 1 && ps.current_chart) { // Mirror
+        actual_lane = ps.current_chart->num_columns - 1 - lane;
     }
 
     double scale = static_cast<double>(width_) / 900.0;
@@ -5131,16 +6324,7 @@ int GameWindow::GetLaneX(int lane) const {
     int field_left = GetFieldLeft();
 
     // --- Routine/Couple Split Logic ---
-    if (current_chart_ && current_chart_->num_columns == 8) {
-        if (current_chart_->chart_type == "dance-couple") {
-            int gap = static_cast<int>(60 * scale);
-            if (actual_lane < 4) {
-                return field_left + actual_lane * (lane_w + scaled_padding);
-            } else {
-                return field_left + actual_lane * (lane_w + scaled_padding) + gap;
-            }
-        }
-    }
+    // No gap between halves as per user request
 
     return field_left + actual_lane * (lane_w + scaled_padding);
 }
@@ -5193,6 +6377,23 @@ void GameWindow::UpdateScores(double abs_error, int num_notes, int p) {
         
         // Update Life
         ps.life_meter.OnJudgement(j_norm);
+
+        // Check for Fail
+        if (ps.life_meter.IsFailed() && !ps.failed_sequence) {
+            ps.failed_sequence = true;
+            ps.fail_animation_timer = 0.0;
+            // Clear combo on fail
+            ps.combo = 0;
+            std::printf("Player %d FAILED!\n", p + 1);
+
+            // Initiate RISKY shatter sequence
+            if (ps.life_meter.GetType() == LifeType::RISKY) {
+                ps.shatter_state = ShatterState::CRACKING;
+                ps.shatter_timer = 0.0;
+                // Stop audio immediately on RISKY fail
+                audio_.Stop();
+            }
+        }
     }
     
     // Global Life (Legacy)
@@ -5364,6 +6565,54 @@ void GameWindow::RenderRating(int x, int y, double rating, TextAlign align, bool
             font_.DrawMonoText(renderer_, cur_x, y + y_off, char_str, c, fs, TextAlign::LEFT, 
                                1.0, "score", cw, true, style.outline_color, 1, 2);
             cur_x += cw + spacing;
+        }
+    }
+}
+
+
+std::string GameWindow::FormatMeter(double d) {
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%.1f", d);
+    return std::string(buf);
+}
+
+void GameWindow::RenderHoldIndicators(int p, const NoteFieldConfig& cfg, const ActiveMods& mods) {
+    if (p < 0 || p >= MAX_PLAYERS) return;
+    auto& ps = players_[p];
+    if (!ps.joined) return;
+
+    bool effectively_down = cfg.downscroll ^ (cfg.reverse_pct > 0.5);
+
+    int receptor_y = static_cast<int>(cfg.receptor_y);
+    // Position indicators ABOVE the receptor line in downscroll (effective), BELOW in upscroll
+    int base_y = effectively_down ? (receptor_y - 75) : (receptor_y + 75);
+
+    for (const auto& hi : ps.hold_indicators) {
+        int x = GetLaneX(hi.lane);
+        int lane_w = GetLaneWidth();
+        
+        SDL_Texture* tex = nullptr;
+        if (hi.grade == 0) tex = hold_good_texture_;
+        else if (hi.grade == 1) tex = hold_ng_texture_;
+        else if (hi.grade == 2) tex = hold_bad_texture_;
+
+        if (tex) {
+            double alpha_pct = hi.timer / 0.6;
+            uint8_t alpha = static_cast<uint8_t>(255 * std::min(1.0, alpha_pct * 2.0));
+            
+            int offset_y = static_cast<int>((1.0 - alpha_pct) * 40.0 * (effectively_down ? -1 : 1));
+            int draw_y = base_y + offset_y;
+
+            int tw, th;
+            SDL_QueryTexture(tex, nullptr, nullptr, &tw, &th);
+            double s = static_cast<double>(lane_w) / tw * 0.4; // Halved from 0.8
+            int dw = static_cast<int>(tw * s);
+            int dh = static_cast<int>(th * s);
+
+            SDL_Rect dst = { x + (lane_w - dw) / 2, draw_y - dh / 2, dw, dh };
+            SDL_SetTextureAlphaMod(tex, alpha);
+            SDL_RenderCopy(renderer_, tex, nullptr, &dst);
+            SDL_SetTextureAlphaMod(tex, 255);
         }
     }
 }

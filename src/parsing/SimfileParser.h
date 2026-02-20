@@ -72,6 +72,15 @@ private:
     /// Parse #SPEEDS tag (beat=value=duration=unit,...) into TimingSegments.
     static std::vector<TimingSegment> ParseSpeedsTag(const std::string& value);
 
+    /// Parse #FAKES tag (beat=length,...) into FakeSegments.
+    static std::vector<FakeSegment> ParseFakesTag(const std::string& value);
+
+    /// Parse #ATTACKS tag (TIME=t:LEN=l:MODS=m,...) into Attacks.
+    static std::vector<Attack> ParseAttacksTag(const std::string& value);
+
+    /// Parse #BGCHANGES tag (beat=file=rate=trans,...) into BGEvents.
+    static std::vector<BGEvent> ParseBGChangesTag(const std::string& value);
+
     /// Parse note data string into NoteRows.
     /// The data is the raw grid text (e.g. "0000\n1000\n..." with measures
     /// separated by commas).

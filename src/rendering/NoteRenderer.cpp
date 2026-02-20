@@ -25,17 +25,45 @@ double NoteRenderer::GetYPosForBeat(
         config.pixels_per_beat
     );
 
-    if (!config.downscroll) {
-        // UPSCROLL: Receptors are at TOP. Notes move UP (from bottom to top).
-        // Raw y from Conductor is (receptor - delta), which would put future notes above the receptor.
-        // We flip it to (receptor + delta) so future notes are below.
-        return 2.0 * config.receptor_y - y;
+    double delta = config.receptor_y - y;
+    double scroll_dir = config.downscroll ? 1.0 : -1.0;
+    
+    // Reverse attack interpolates the scroll direction
+    // If downscroll: 1.0 (reverse=0) -> -1.0 (reverse=1)
+    // If upscroll: -1.0 (reverse=0) -> 1.0 (reverse=1)
+    if (config.downscroll) {
+        scroll_dir = 1.0 - 2.0 * config.reverse_pct;
     } else {
-        // DOWNSCROLL: Receptors are at BOTTOM. Notes move DOWN (from top to bottom).
-        // Raw y from Conductor is (receptor - delta), which puts future notes above the receptor.
-        // This is exactly what we want for Downscroll.
-        return y;
+        scroll_dir = -1.0 + 2.0 * config.reverse_pct;
     }
+
+    return config.receptor_y - delta * scroll_dir;
+}
+
+double NoteRenderer::GetYPosForRow(
+    const NoteRow& row,
+    const Conductor& conductor,
+    const NoteFieldConfig& config
+) {
+    double scale = config.screen_height / 480.0;
+    double y;
+
+    if (config.mod_type == ScrollModType::XMod) {
+        y = conductor.GetYPosForVisualPos(row.visual_pos, config.speed_mod * scale, config.receptor_y, config.pixels_per_beat);
+    } else {
+        y = conductor.GetYPosForTime(row.time, config.speed_mod, config.receptor_y);
+    }
+
+    double delta = config.receptor_y - y;
+    double scroll_dir = config.downscroll ? 1.0 : -1.0;
+    
+    if (config.downscroll) {
+        scroll_dir = 1.0 - 2.0 * config.reverse_pct;
+    } else {
+        scroll_dir = -1.0 + 2.0 * config.reverse_pct;
+    }
+
+    return config.receptor_y - delta * scroll_dir;
 }
 
 std::pair<size_t, size_t> NoteRenderer::GetVisibleNoteRange(

@@ -47,7 +47,9 @@ static void TestConstantBPM() {
     std::vector<TimingSegment> stops;
     std::vector<TimingSegment> scrolls;
 
-    conductor.Initialize(bpms, stops, scrolls, 0.0);
+    std::vector<TimingSegment> speeds;
+
+    conductor.Initialize(bpms, stops, scrolls, speeds, 0.0);
 
     // At 120 BPM: 2 beats per second
     // Beat 0 = Time 0
@@ -87,7 +89,9 @@ static void TestBPMChange() {
     std::vector<TimingSegment> stops;
     std::vector<TimingSegment> scrolls;
 
-    conductor.Initialize(bpms, stops, scrolls, 0.0);
+    std::vector<TimingSegment> speeds;
+
+    conductor.Initialize(bpms, stops, scrolls, speeds, 0.0);
 
     // Phase 1: 120 BPM (2 beats/sec)
     // Beat 4 = Time 2.0
@@ -128,7 +132,9 @@ static void TestStop() {
     };
     std::vector<TimingSegment> scrolls;
 
-    conductor.Initialize(bpms, stops, scrolls, 0.0);
+    std::vector<TimingSegment> speeds;
+
+    conductor.Initialize(bpms, stops, scrolls, speeds, 0.0);
 
     // Before stop: normal 120 BPM
     ASSERT_APPROX(conductor.TimeToBeat(1.0), 2.0);
@@ -174,7 +180,9 @@ static void TestScrollSegments() {
         {4.0, 2.0, TimingSegmentType::Scroll},  // 2x scroll at beat 4
     };
 
-    conductor.Initialize(bpms, stops, scrolls, 0.0);
+    std::vector<TimingSegment> speeds;
+
+    conductor.Initialize(bpms, stops, scrolls, speeds, 0.0);
 
     // Before scroll change: 1:1 visual position
     ASSERT_APPROX(conductor.BeatToVisualPosition(0.0), 0.0);
@@ -211,7 +219,9 @@ static void TestRoundTrip() {
     };
     std::vector<TimingSegment> scrolls;
 
-    conductor.Initialize(bpms, stops, scrolls, 0.0);
+    std::vector<TimingSegment> speeds;
+
+    conductor.Initialize(bpms, stops, scrolls, speeds, 0.0);
 
     // Test round-trip at various time points
     double test_times[] = {0.0, 0.5, 1.0, 1.5, 3.0, 5.0, 7.0, 10.0, 15.0};
@@ -254,7 +264,9 @@ static void TestGetYPosForBeat() {
     std::vector<TimingSegment> stops;
     std::vector<TimingSegment> scrolls;
 
-    conductor.Initialize(bpms, stops, scrolls, 0.0);
+    std::vector<TimingSegment> speeds;
+
+    conductor.Initialize(bpms, stops, scrolls, speeds, 0.0);
     conductor.Update(0.0); // Current beat = 0
 
     double receptor_y = 500.0;
@@ -300,7 +312,9 @@ static void TestCombinedBPMAndStop() {
     };
     std::vector<TimingSegment> scrolls;
 
-    conductor.Initialize(bpms, stops, scrolls, 0.0);
+    std::vector<TimingSegment> speeds;
+
+    conductor.Initialize(bpms, stops, scrolls, speeds, 0.0);
 
     // Beat 4 at time 2.0 (120 BPM for 4 beats)
     ASSERT_APPROX(conductor.TimeToBeat(2.0), 4.0);
@@ -350,7 +364,9 @@ static void TestOffset() {
     // Initialize(..., 0.1). Offset = 0.1. Beat 0 at -0.1s.
     // At Time 0.0, we are 0.1s past Beat 0.
     // 0.1s at 120BPM (0.5s/beat) = 0.2 beats.
-    conductor.Initialize(bpms, stops, scrolls, 0.1);
+    std::vector<TimingSegment> speeds;
+
+    conductor.Initialize(bpms, stops, scrolls, speeds, 0.1);
 
     ASSERT_APPROX(conductor.TimeToBeat(0.0), 0.2);
     ASSERT_APPROX(conductor.TimeToBeat(0.1), 0.4);

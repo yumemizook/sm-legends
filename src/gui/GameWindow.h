@@ -40,13 +40,27 @@
 #include "parsing/SongScanner.h"
 #include "audio/AudioEngine.h"
 #include "input/InputMapper.h"
+#include "video/VideoDecoder.h" // Video Support
 #include "gameplay/LifeMeter.h"
 #include "gui/FontManager.h"
 #include "core/Profile.h"
+#include "timing/AttackMods.h"
 
 #include "gui/Color.h"
 
 namespace sml {
+
+// Shatter particle for RISKY gauge destruction
+struct ShatterParticle {
+    float x, y;           // position
+    float vx, vy;         // velocity
+    float rot, rot_v;     // rotation angle and angular velocity
+    float w, h;           // shard size
+    Color c;              // color
+    float alpha = 255.0f; // fade
+};
+
+enum class ShatterState { NONE, CRACKING, SHATTERING };
 
 /// Lane colors matching StepMania's DDR-style coloring by beat subdivision
 namespace LaneColors {
@@ -74,6 +88,16 @@ enum class ScreenState {
     OPTIONS,
     CALIBRATION,
 };
+
+enum class ComboDisplayMode {
+    None, Combo, AdditiveScore, SubtractiveScore,
+    DiffS, DiffS_Plus, DiffSS, DiffSS_Plus, DiffSSS, DiffSSS_Plus,
+    AdditiveEX, SubtractiveEX,
+    DiffEX_1Star, DiffEX_2Star, DiffEX_3Star, DiffEX_4Star, DiffEX_5Star, DiffEX_6Star,
+    HitOffset
+};
+
+enum class BGABrightness { LIGHTER, NORMAL, DARK, DARKER, DARKEST };
 
 /// Clear types (per cleartypes.md)
 enum class ClearType {
@@ -120,6 +144,37 @@ struct HitRecord {
     bool is_ex_grade;  ///< Whether this was graded using EX standards (stored for reference)
 };
 
+/// Visual indicator at the end of a Hold or Roll
+struct HoldIndicator {
+    int lane;
+    int grade;   ///< 0=Good, 1=NG, 2=Bad
+    double timer; ///< Total lifetime ~0.6s
+};
+
+/// Active state of a Hold or Roll note
+struct ActiveHold {
+    size_t row_index;       ///< Index in NoteChart::note_rows
+    int col_index;          ///< Lane index
+    NoteType type;          ///< HoldHead or RollHead
+    
+    double start_time;      ///< Time the head was hit
+    double end_time;        ///< Time the tail ends
+    double total_duration;  ///< end_time - start_time
+    
+    // Hold Specifics
+    double time_held;            ///< Accumulated time the button was held
+    double current_release_time; ///< How long it has been released *currently*
+    bool broken_continuity;      ///< If release time ever exceeded 250ms
+    
+    // Roll Specifics
+    int required_ticks;             ///< Total ticks required (one per beat)
+    int ticks_hit;                  ///< Count of fresh taps registered during roll
+    
+    // Autoplay / Logic
+    double start_beat;              ///< Beat where the hold started
+    double last_autoplay_tick_beat; ///< Last beat where autoplay registered a roll hit
+};
+
 /// Per-player state for 2P support
 struct PlayerState {
     bool   joined     = false;  ///< Whether this player slot is active
@@ -140,6 +195,7 @@ struct PlayerState {
     int    ex_judge_counts[9]     = {};
     double normal_score = 0.0;
     double ex_score     = 0.0;
+    int    hold_judgement_counts[3] = {}; // 0=Good, 1=NG, 2=Bad
     LifeMeter life_meter;
     ClearType clear_type = ClearType::NONE;
     Judgement lowest_judgement_in_combo = Judgement::NONE;
@@ -149,14 +205,18 @@ struct PlayerState {
     Judgement last_judgement      = Judgement::NONE;
     double    judgement_timer     = 0.0;
     double    last_timing_error   = 0.0;
+    std::string last_combo_text;
+    double    score_anim_timer    = 0.0;
 
     // Hit detection
     size_t next_hittable_note      = 0;
     std::vector<uint32_t> note_hit_masks;
     std::vector<double>   row_best_error;
+    std::vector<ActiveHold> active_holds; // Track active holds/rolls
 
     // Hit flash silhouettes
     std::vector<HitFlash> hit_flashes;
+    std::vector<HoldIndicator> hold_indicators;    // End-of-hold visual status
 
     // Records
     std::vector<HitRecord> hit_history;
@@ -170,7 +230,10 @@ struct PlayerState {
     NoteChart runtime_chart;
     double chart_end_time = 0.0;
     bool chart_finished = false;
-    double results_delay = 1.5;
+    bool ready = false;
+    double results_delay = 0.0;
+    double last_up_press_time = 0.0;
+    double last_down_press_time = 0.0;
 
     // Visual polish
     double combo_pop_timer       = 0.0;
@@ -178,9 +241,38 @@ struct PlayerState {
     double grade_popup_timer     = 0.0;
     const char* grade_popup_str  = "";
 
+    // Life gauge animations
+    float  displayed_life        = 0.8f;
+    int    last_active_segments  = 16;
+    double segment_flash_timers[20] = {0};
+    int    last_battery_lives    = 0;
+    double battery_flash_timers[4] = {0};
+    double flare_flash_timer     = 0.0;
+    float  last_flare_life       = 1.0f;
+
+    // RISKY shatter animation
+    ShatterState shatter_state   = ShatterState::NONE;
+    double shatter_timer         = 0.0;
+    std::vector<ShatterParticle> shatter_particles;
+
     // NoteFieldConfig per-player (for split screen)
     NoteFieldConfig field_config;
     int field_x_offset = 0; ///< Horizontal pixel offset for this player's notefield
+
+    // Modifier menu state (per-player)
+    bool   showing_modifier_menu = false;
+    int    modifier_menu_cursor  = 0;
+    float  sudden_plus_val       = 0.0f;
+    float  hidden_plus_val       = 0.0f;
+    int    effect_mode           = 0; // 0: None, 1: Mirror, 2: Random
+    int    noteskin_index        = 0;
+    bool   ex_mode               = false;
+    ComboDisplayMode combo_display_mode = ComboDisplayMode::Combo;
+    BGABrightness bga_brightness = BGABrightness::NORMAL;
+    ActiveMods   smoothed_mods; // For seamless transitions
+
+    // Animation state
+    double modifier_menu_anim = 0.0; // 0.0 to 1.0 (open/close)
 
     /// Reset all gameplay state for a new chart
     void ResetGameplay() {
@@ -207,11 +299,26 @@ struct PlayerState {
         results_delay = 1.5;
         note_hit_masks.clear();
         row_best_error.clear();
+        active_holds.clear(); // Clear active holds
         hit_flashes.clear();
+        hold_indicators.clear();
         hit_history.clear();
         std::memset(normal_judge_counts, 0, sizeof(normal_judge_counts));
         std::memset(ex_judge_counts, 0, sizeof(ex_judge_counts));
+        std::memset(hold_judgement_counts, 0, sizeof(hold_judgement_counts));
         input.Reset();
+        modifier_menu_anim = 0.0;
+        showing_modifier_menu = false;
+        displayed_life = 0.0f;
+        last_active_segments = 0;
+        std::memset(segment_flash_timers, 0, sizeof(segment_flash_timers));
+        last_battery_lives = 0;
+        std::memset(battery_flash_timers, 0, sizeof(battery_flash_timers));
+        flare_flash_timer = 0.0;
+        last_flare_life = 1.0f;
+        shatter_state = ShatterState::NONE;
+        shatter_timer = 0.0;
+        shatter_particles.clear();
     }
 };
 
@@ -241,9 +348,17 @@ private:
     void HandleKeyDown_Results(SDL_Keycode key);
     void HandleKeyDown_Options(SDL_Keycode key);
     void HandleKeyDown_Calibration(SDL_Keycode key);
+    void HandleKeyDown_ModifierMenu(int p, SDL_Keycode key);
+    void HandleModifierMenuInput(int p, SDL_Keycode key);
 
     void HandleControllerButtonDown(SDL_GameControllerButton button);
     void HandleControllerButtonUp(SDL_GameControllerButton button);
+
+    // --- Animation & Transition state ---
+    double screen_transition_timer_ = 1.0; 
+    double global_anim_timer_      = 0.0;
+    ScreenState target_screen_     = ScreenState::ATTRACTION;
+    bool is_transitioning_         = false;
 
     // --- Update ---
     void Update(double dt);
@@ -253,7 +368,7 @@ private:
     void UpdateClearType(Judgement j_norm, Judgement j_ex, int player_idx = 0);
 
     // --- Hit detection ---
-    void ProcessLaneHit(int lane, double forced_time = -1.0, int player_idx = 0);
+    void ProcessLaneHit(int lane, double forced_time = -1.0, int player_idx = 0, bool is_release = false);
 
     // --- Rendering: dispatch ---
     void Render();
@@ -279,6 +394,7 @@ private:
     };
     RatingStyle GetRatingStyle(double rating);
     void RenderRating(int x, int y, double rating, TextAlign align, bool is_p2);
+    static std::string FormatMeter(double d);
 
     // --- Rendering: Song Select ---
     void RenderSongSelect();
@@ -286,15 +402,18 @@ private:
     void RenderSongList();
     void RenderChartPanel(int p);
     void RenderSongSelectHUD();
+    void RenderModifierMenu(int p);
+    std::string GetComboDisplayText(int p);
 
     // --- Rendering: Gameplay ---
     void RenderDecide();
     void RenderGameplay();
     void RenderBackground();
     void RenderLanes();
-    void RenderReceptors();
-    void RenderNotes();
-    void RenderMeasureLines();
+    void RenderReceptors(const NoteFieldConfig& cfg, const ActiveMods& mods);
+    void RenderHoldIndicators(int p, const NoteFieldConfig& cfg, const ActiveMods& mods);
+    void RenderNotes(const NoteFieldConfig& cfg, const ActiveMods& mods);
+    void RenderMeasureLines(const NoteFieldConfig& cfg, const ActiveMods& mods);
     void RenderMasks();
     void RenderHUD();
     void RenderPlayerTopHUD(int p);
@@ -302,7 +421,7 @@ private:
     void RenderProgressBar();
     void RenderBeatFlash();
     void RenderJudgement();
-    void RenderHitFlashes();
+    void RenderHitFlashes(const NoteFieldConfig& cfg, const ActiveMods& mods);
     void RenderFailOverlay();
     void RenderModifierMenu();
     void RenderOptions();
@@ -310,7 +429,7 @@ private:
 
     // --- Rendering: Results ---
     void RenderResults();
-    void RenderResultsPanel(int x, int y, int w, int h, const PlayerState& ps);
+    void RenderResultsPanel(int p, double t, int x, int y, int w, int h);
     void RenderOffsetGraph(int x, int y, int w, int h, const std::vector<HitRecord>& hits);
 
     // --- Transitions ---
@@ -331,7 +450,9 @@ private:
     // --- Drawing helpers ---
     Color GetNoteColor(double beat) const;
     int GetQuantizationRow(double beat) const;
-    void DrawNote(int lane, double y, double beat, NoteType type);
+    void DrawNote(int lane, double y, double beat, NoteType type,
+                  double x_offset = 0.0, double scale = 1.0, double extra_angle = 0.0,
+                  double alpha = 1.0);
     void DrawRect(int x, int y, int w, int h, Color color);
     void DrawRectOutline(int x, int y, int w, int h, Color color);
     void DrawText(int x, int y, const std::string& text, Color color, int scale = 2);
@@ -408,10 +529,24 @@ private:
     std::map<std::string, SDL_Texture*> normal_grade_textures_;
     std::map<int, SDL_Texture*> ex_grade_textures_;
 
+    SDL_Texture* hold_good_texture_ = nullptr;
+    SDL_Texture* hold_ng_texture_   = nullptr;
+    SDL_Texture* hold_bad_texture_  = nullptr;
+    int hold_judge_w_ = 0, hold_judge_h_ = 0;
+
     SDL_Texture* bg_texture_ = nullptr;
 
     std::map<std::string, SDL_Texture*> jacket_cache_;
+    std::map<std::string, SDL_Texture*> bga_textures_;
+
+    // --- Current BGA State ---
+    SDL_Texture* current_bga_tex_ = nullptr;
+    std::string current_bga_file_;
+    std::string auto_bga_file_; // Discovered video file when #BGCHANGES is missing
+    double last_bga_beat_ = -1.0;
+
     SDL_Texture* GetJacketTexture(const std::string& path);
+    SDL_Texture* GetBGATexture(const std::string& path);
 
     SDL_Texture* LoadTexture(const std::string& path, int* w, int* h, bool make_white = false);
 
@@ -420,15 +555,13 @@ private:
     int  selected_chart_[MAX_PLAYERS] = {0, 0};
     int  scroll_offset_  = 0;
     int  visible_songs_  = 12;
-    double last_up_press_time_   = 0.0;
-    double last_down_press_time_ = 0.0;
     
-    // Modifier menu state
+    // Legacy/Shared mod state (to be replaced by per-player)
     bool   showing_modifier_menu_ = false;
     int    modifier_menu_cursor_  = 0;
     float  sudden_plus_val_       = 0.0f;
     float  hidden_plus_val_       = 0.0f;
-    int    effect_mode_           = 0; // 0: None, 1: Mirror, 2: Random
+    int    effect_mode_           = 0; 
     std::vector<std::string> available_noteskins_;
     int    noteskin_index_        = 0;
 
@@ -559,10 +692,6 @@ private:
     double      decide_timer_ = 0.0;
 
     // Polish Effects
-    double transition_timer_    = 0.0;
-    double transition_duration_ = 0.4;
-    ScreenState next_screen_    = ScreenState::ATTRACTION;
-    bool is_transitioning_      = false;
 
     double combo_pop_timer_     = 0.0;
     
@@ -572,6 +701,7 @@ private:
 
     double ready_animation_timer_ = 0.0;
     double clear_animation_timer_ = 0.0;
+    double time_scale_            = 1.0; // For gradual halt on total failure
 
     struct ScoreRecord {
         double percentage = 0.0;
@@ -622,6 +752,10 @@ private:
     int render_player_idx_ = 0; ///< Which player index is currently being rendered
 
     bool center_1p_ = false;   ///< If true, 1P notefield is centered instead of side-aligned
+
+    // --- Video Decoder ---
+    VideoDecoder video_decoder_;
+    std::string video_path_;
 };
 
 /// Generate a built-in test chart.

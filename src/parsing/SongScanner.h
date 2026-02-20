@@ -29,12 +29,16 @@ struct SongEntry {
         std::string chart_type;
         std::string difficulty_name;
         int         difficulty_meter = 0;
-        int         custom_difficulty = 1; ///< 1-30 scale
+        double      custom_difficulty = 1.0; ///< 1.0-30.0 scale
         std::string credit;
         RadarValues radar;
         ChartVariant variant = ChartVariant::Normal;
         std::string variant_kanji;
         int         num_notes = 0;
+
+        bool Is8Lane() const {
+            return chart_type == "dance-double" || chart_type == "dance-routine" || chart_type == "dance-couple";
+        }
     };
     std::vector<ChartInfo> charts;
 

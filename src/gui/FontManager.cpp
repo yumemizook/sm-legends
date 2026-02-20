@@ -92,8 +92,11 @@ void FontManager::DrawText(SDL_Renderer* renderer, int x, int y,
         else if ((c & 0xF8) == 0xF0) { ch = text.substr(i, 4); i += 4; }
         else { i++; continue; }
 
-        SDL_Texture* tex = GetGlyphTexture(renderer, ch, size, color, fontName, 0);
+        SDL_Texture* tex = GetGlyphTexture(renderer, ch, size, fontName, 0);
         if (!tex) continue;
+
+        SDL_SetTextureColorMod(tex, color.r, color.g, color.b);
+        SDL_SetTextureAlphaMod(tex, color.a);
 
         int w, h;
         SDL_QueryTexture(tex, NULL, NULL, &w, &h);
@@ -102,6 +105,11 @@ void FontManager::DrawText(SDL_Renderer* renderer, int x, int y,
 
         SDL_Rect dst = { cur_x, y, sw, sh };
         SDL_RenderCopy(renderer, tex, NULL, &dst);
+
+        // Reset modulation
+        SDL_SetTextureColorMod(tex, 255, 255, 255);
+        SDL_SetTextureAlphaMod(tex, 255);
+
         cur_x += sw;
     }
 }
@@ -128,25 +136,38 @@ void FontManager::DrawTextOutline(SDL_Renderer* renderer, int x, int y,
         else { i++; continue; }
 
         // Draw outline first
-        SDL_Texture* out_tex = GetGlyphTexture(renderer, ch, size, outlineColor, fontName, thickness);
+        SDL_Texture* out_tex = GetGlyphTexture(renderer, ch, size, fontName, thickness);
         if (out_tex) {
+            SDL_SetTextureColorMod(out_tex, outlineColor.r, outlineColor.g, outlineColor.b);
+            SDL_SetTextureAlphaMod(out_tex, outlineColor.a);
+
             int w, h;
             SDL_QueryTexture(out_tex, NULL, NULL, &w, &h);
             int sw = static_cast<int>(w * scale);
             int sh = static_cast<int>(h * scale);
             SDL_Rect dst = { cur_x - static_cast<int>(thickness * scale), y - static_cast<int>(thickness * scale), sw, sh };
             SDL_RenderCopy(renderer, out_tex, NULL, &dst);
+
+            SDL_SetTextureColorMod(out_tex, 255, 255, 255);
+            SDL_SetTextureAlphaMod(out_tex, 255);
         }
 
         // Draw character
-        SDL_Texture* tex = GetGlyphTexture(renderer, ch, size, color, fontName, 0);
+        SDL_Texture* tex = GetGlyphTexture(renderer, ch, size, fontName, 0);
         if (tex) {
+            SDL_SetTextureColorMod(tex, color.r, color.g, color.b);
+            SDL_SetTextureAlphaMod(tex, color.a);
+
             int w, h;
             SDL_QueryTexture(tex, NULL, NULL, &w, &h);
             int sw = static_cast<int>(w * scale);
             int sh = static_cast<int>(h * scale);
             SDL_Rect dst = { cur_x, y, sw, sh };
             SDL_RenderCopy(renderer, tex, NULL, &dst);
+
+            SDL_SetTextureColorMod(tex, 255, 255, 255);
+            SDL_SetTextureAlphaMod(tex, 255);
+
             cur_x += sw;
         }
     }
@@ -203,8 +224,11 @@ void FontManager::DrawMonoText(SDL_Renderer* renderer, int x, int y, const std::
 
         if (useOutline) {
             int thickness = outlineThickness;
-            SDL_Texture* out_tex = GetGlyphTexture(renderer, ch, size, actualOutline, fontName, thickness);
+            SDL_Texture* out_tex = GetGlyphTexture(renderer, ch, size, fontName, thickness);
             if (out_tex) {
+                SDL_SetTextureColorMod(out_tex, actualOutline.r, actualOutline.g, actualOutline.b);
+                SDL_SetTextureAlphaMod(out_tex, actualOutline.a);
+
                 int w, h;
                 SDL_QueryTexture(out_tex, NULL, NULL, &w, &h);
                 int sw = static_cast<int>(w * scale);
@@ -224,11 +248,17 @@ void FontManager::DrawMonoText(SDL_Renderer* renderer, int x, int y, const std::
                     SDL_Rect dst = { out_x, out_y, sw, sh };
                     SDL_RenderCopy(renderer, out_tex, NULL, &dst);
                 }
+
+                SDL_SetTextureColorMod(out_tex, 255, 255, 255);
+                SDL_SetTextureAlphaMod(out_tex, 255);
             }
         }
 
-        SDL_Texture* tex = GetGlyphTexture(renderer, ch, size, color, fontName, 0);
+        SDL_Texture* tex = GetGlyphTexture(renderer, ch, size, fontName, 0);
         if (tex) {
+            SDL_SetTextureColorMod(tex, color.r, color.g, color.b);
+            SDL_SetTextureAlphaMod(tex, color.a);
+
             int w, h;
             SDL_QueryTexture(tex, NULL, NULL, &w, &h);
             int sw = static_cast<int>(w * scale);
@@ -247,6 +277,9 @@ void FontManager::DrawMonoText(SDL_Renderer* renderer, int x, int y, const std::
                 SDL_Rect dst = { tx, y, sw, sh };
                 SDL_RenderCopy(renderer, tex, NULL, &dst);
             }
+
+            SDL_SetTextureColorMod(tex, 255, 255, 255);
+            SDL_SetTextureAlphaMod(tex, 255);
         }
         curX += scaledCellW;
     }
@@ -302,6 +335,56 @@ void FontManager::DrawAccuracy(SDL_Renderer* renderer, int x, int y,
     DrawMonoText(renderer, draw_x + int_w, y + scaled_offset_y, dec_part, color, decimalSize, TextAlign::LEFT, scale, "score", decDigitW, useOutline, outlineColor, 0, outlineThickness);
 }
 
+void FontManager::DrawStyledNumber(SDL_Renderer* renderer, int x, int y, 
+                         const std::string& text, Color color, TextAlign align, double scale,
+                         bool useOutline, Color outlineColor,
+                         FontSize largeSize, FontSize smallSize,
+                         int outlineThickness) 
+{
+    if (text.empty()) return;
+
+    size_t dot_pos = text.find('.');
+    std::string large_part = text;
+    std::string small_part = "";
+
+    if (dot_pos != std::string::npos) {
+        large_part = text.substr(0, dot_pos);
+        small_part = text.substr(dot_pos);
+    } else {
+        // If no dot, check if it ends with %
+        if (text.back() == '%') {
+            large_part = text.substr(0, text.size() - 1);
+            small_part = "%";
+        }
+    }
+
+    int largeW = GetTextWidth("0", largeSize, "score");
+    int scaledLargeW = static_cast<int>(largeW * scale);
+    int large_total_w = static_cast<int>(large_part.length() * scaledLargeW);
+    
+    int smallW = GetTextWidth("0", smallSize, "score");
+    int scaledSmallW = static_cast<int>(smallW * scale);
+    int small_total_w = static_cast<int>(small_part.length() * scaledSmallW);
+    
+    int total_w = large_total_w + small_total_w;
+
+    int draw_x = x;
+    if (align == TextAlign::CENTER) draw_x -= total_w / 2;
+    else if (align == TextAlign::RIGHT) draw_x -= total_w;
+
+    int large_h = GetFontHeight(largeSize, "score");
+    int small_h = GetFontHeight(smallSize, "score");
+    int offset_y = static_cast<int>(((large_h - small_h) - 8) * scale);
+
+    // Draw large part (Integer/Sign)
+    DrawMonoText(renderer, draw_x, y, large_part, color, largeSize, TextAlign::LEFT, scale, "score", largeW, useOutline, outlineColor, 0, outlineThickness);
+    
+    // Draw small part (Decimal/Percent)
+    if (!small_part.empty()) {
+        DrawMonoText(renderer, draw_x + large_total_w, y + offset_y, small_part, color, smallSize, TextAlign::LEFT, scale, "score", smallW, useOutline, outlineColor, 0, outlineThickness);
+    }
+}
+
 int FontManager::GetTextWidth(const std::string& text, FontSize size, const std::string& fontName) {
     TTF_Font* font = GetFont(size, fontName);
     if (!font || text.empty()) return 0;
@@ -332,8 +415,8 @@ TTF_Font* FontManager::GetFont(FontSize size, const std::string& name) {
     return nullptr;
 }
 
-SDL_Texture* FontManager::GetGlyphTexture(SDL_Renderer* renderer, const std::string& ch, FontSize size, Color color, const std::string& fontName, int outline) {
-    GlyphKey key = { fontName, size, ch, color, outline };
+SDL_Texture* FontManager::GetGlyphTexture(SDL_Renderer* renderer, const std::string& ch, FontSize size, const std::string& fontName, int outline) {
+    GlyphKey key = { fontName, size, ch, outline };
     if (glyph_cache_.count(key)) return glyph_cache_[key];
 
     TTF_Font* font = GetFont(size, fontName);
@@ -341,8 +424,9 @@ SDL_Texture* FontManager::GetGlyphTexture(SDL_Renderer* renderer, const std::str
 
     TTF_SetFontOutline(font, outline);
     
-    SDL_Color sdl_col = { color.r, color.g, color.b, color.a };
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, ch.c_str(), sdl_col);
+    // Always render as white for caching, use color modulation at draw time
+    SDL_Color white = { 255, 255, 255, 255 };
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, ch.c_str(), white);
     
     // Reset outline for other queries
     TTF_SetFontOutline(font, 0);

@@ -1,0 +1,317 @@
+AudioEngine: Some audio decoders unavailable: FLAC support not available
+AudioEngine: Initialized (freq=44100, channels=2, chunk=1024)
+Noteskin 'Default' loaded successfully.
+Scanning default 'charts' folder...
+SongScanner: Found 16 simfiles in 'charts'
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.5370
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.0460
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.0460
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.0460
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.0460
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.0460
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.0460
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.0460
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=39 stops=50 scrolls=0 speeds=0 offset=0.4000
+[Conductor] TimeBeatTable built: 128 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=39 stops=50 scrolls=0 speeds=0 offset=0.4000
+[Conductor] TimeBeatTable built: 128 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.5200
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=762 speeds=29 offset=0.0000
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 791 segments
+[Conductor] Initialize: bpms=11 stops=12 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 35 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=11 stops=12 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 35 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=11 stops=12 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 35 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=11 stops=12 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 35 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=11 stops=12 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 35 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=11 stops=12 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 35 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=11 stops=12 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 35 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=11 stops=12 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 35 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=11 stops=12 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 35 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=15 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 15 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=15 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 15 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=15 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 15 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=15 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 15 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=15 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 15 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=15 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 15 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=15 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 15 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=15 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 15 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=15 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 15 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-7.5300
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-7.5300
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-7.5300
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-7.5300
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=3 stops=0 scrolls=0 speeds=0 offset=1.0018
+[Conductor] TimeBeatTable built: 3 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=3 stops=0 scrolls=0 speeds=0 offset=1.0018
+[Conductor] TimeBeatTable built: 3 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=3 stops=0 scrolls=0 speeds=0 offset=1.0018
+[Conductor] TimeBeatTable built: 3 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=3 stops=0 scrolls=0 speeds=0 offset=1.0018
+[Conductor] TimeBeatTable built: 3 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=3 stops=0 scrolls=0 speeds=0 offset=1.0018
+[Conductor] TimeBeatTable built: 3 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=3 stops=0 scrolls=0 speeds=0 offset=1.0018
+[Conductor] TimeBeatTable built: 3 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=3 stops=0 scrolls=0 speeds=0 offset=1.0018
+[Conductor] TimeBeatTable built: 3 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=3 stops=0 scrolls=0 speeds=0 offset=1.0018
+[Conductor] TimeBeatTable built: 3 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=3 stops=0 scrolls=0 speeds=0 offset=1.0018
+[Conductor] TimeBeatTable built: 3 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=6 stops=4 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 13 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=6 stops=4 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 13 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=6 stops=4 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 13 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=6 stops=4 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 13 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=6 stops=4 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 13 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=6 stops=4 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 13 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=6 stops=4 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 13 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=6 stops=4 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 13 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=6 stops=4 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 13 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=146 stops=4 scrolls=0 speeds=0 offset=-0.2000
+[Conductor] TimeBeatTable built: 151 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=146 stops=4 scrolls=0 speeds=0 offset=-0.2000
+[Conductor] TimeBeatTable built: 151 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=146 stops=4 scrolls=0 speeds=0 offset=-0.2000
+[Conductor] TimeBeatTable built: 151 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=146 stops=4 scrolls=0 speeds=0 offset=-0.2000
+[Conductor] TimeBeatTable built: 151 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=146 stops=4 scrolls=0 speeds=0 offset=-0.2000
+[Conductor] TimeBeatTable built: 151 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=2 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 2 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=2 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 2 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=2 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 2 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=2 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 2 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=2 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 2 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=2 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 2 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=2 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 2 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=2 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 2 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=2 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 2 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.4650
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.4650
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.4650
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=-0.4650
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=1 stops=0 scrolls=0 speeds=0 offset=0.1730
+[Conductor] TimeBeatTable built: 1 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=4 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 4 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=4 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 4 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=4 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 4 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=4 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 4 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=4 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 4 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=4 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 4 segments
+[Conductor] VisualTable built: 1 segments
+[Conductor] Initialize: bpms=4 stops=0 scrolls=0 speeds=0 offset=0.0000
+[Conductor] TimeBeatTable built: 4 segments
+[Conductor] VisualTable built: 1 segments
+SongScanner: 16 songs loaded successfully
+
+--- Song Select Controls ---
+  Up / Down    : Navigate songs
+  Left / Right : Navigate charts
+  Enter        : Play selected chart
+  T            : Load test chart
+  Escape       : Quit
+
+--- Gameplay Controls ---
+  D F J K      : Lane keys (4-key)
+  ZX./         : Alt lane keys (4-key)
+  Arrows       : Alt lane keys (4-key)
+  Space        : Play / Pause
+  R            : Reset to beginning
+  F2 / F3      : Speed up / down
+  Tab          : Toggle X-Mod / C-Mod
+  F4           : Toggle

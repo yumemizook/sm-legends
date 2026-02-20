@@ -145,6 +145,8 @@ void SimfileParser::ParseGlobalTags(
     std::string stops_str   = ExtractTagValue(data, "STOPS");
     std::string scrolls_str = ExtractTagValue(data, "SCROLLS");
     std::string speeds_str  = ExtractTagValue(data, "SPEEDS");
+    std::string fakes_str   = ExtractTagValue(data, "FAKES");
+    std::string attacks_str = ExtractTagValue(data, "ATTACKS");
 
     if (!bpms_str.empty())
         simfile.bpms = ParseTimingTag(bpms_str, TimingSegmentType::BPM);
@@ -154,6 +156,23 @@ void SimfileParser::ParseGlobalTags(
         simfile.scrolls = ParseTimingTag(scrolls_str, TimingSegmentType::Scroll);
     if (!speeds_str.empty())
         simfile.speeds = ParseSpeedsTag(speeds_str);
+    if (!fakes_str.empty())
+        simfile.fakes = ParseFakesTag(fakes_str);
+    if (!attacks_str.empty())
+        simfile.attacks = ParseAttacksTag(attacks_str);
+
+    // --- BG Changes ---
+    std::string bgc1 = ExtractTagValue(data, "BGCHANGES");
+    std::string bgc2 = ExtractTagValue(data, "BGCHANGES1"); // Some files use this
+    if (!bgc1.empty()) {
+        auto events = ParseBGChangesTag(bgc1);
+        simfile.bg_changes.insert(simfile.bg_changes.end(), events.begin(), events.end());
+    }
+    if (!bgc2.empty()) {
+        auto events = ParseBGChangesTag(bgc2);
+        simfile.bg_changes.insert(simfile.bg_changes.end(), events.begin(), events.end());
+    }
+    std::sort(simfile.bg_changes.begin(), simfile.bg_changes.end());
 }
 
 // ============================================================================
@@ -273,6 +292,8 @@ void SimfileParser::ParseSSCNoteData(const std::string& data, Simfile& simfile) 
         std::string chart_stops   = ExtractTagValue(block, "STOPS");
         std::string chart_scrolls = ExtractTagValue(block, "SCROLLS");
         std::string chart_speeds  = ExtractTagValue(block, "SPEEDS");
+        std::string chart_fakes   = ExtractTagValue(block, "FAKES");
+        std::string chart_attacks = ExtractTagValue(block, "ATTACKS");
 
         if (!chart_offset.empty()) {
             chart.offset = std::stod(chart_offset);
@@ -292,6 +313,14 @@ void SimfileParser::ParseSSCNoteData(const std::string& data, Simfile& simfile) 
         }
         if (!chart_speeds.empty()) {
             chart.speeds = ParseSpeedsTag(chart_speeds);
+            chart.has_own_timing = true;
+        }
+        if (!chart_fakes.empty()) {
+            chart.fakes = ParseFakesTag(chart_fakes);
+            chart.has_own_timing = true;
+        }
+        if (!chart_attacks.empty()) {
+            chart.attacks = ParseAttacksTag(chart_attacks);
             chart.has_own_timing = true;
         }
 
@@ -372,6 +401,137 @@ std::vector<TimingSegment> SimfileParser::ParseSpeedsTag(const std::string& valu
     }
 
     return segments;
+}
+
+std::vector<FakeSegment> SimfileParser::ParseFakesTag(const std::string& value) {
+    // Format: "beat=length,beat=length,..."
+    std::vector<FakeSegment> segments;
+    std::string trimmed = Trim(value);
+    if (trimmed.empty()) return segments;
+
+    std::istringstream stream(trimmed);
+    std::string entry;
+
+    while (std::getline(stream, entry, ',')) {
+        entry = Trim(entry);
+        if (entry.empty()) continue;
+
+        // Split by '='
+        size_t eq = entry.find('=');
+        if (eq == std::string::npos) continue;
+
+        FakeSegment seg;
+        seg.start_beat   = std::stod(entry.substr(0, eq));
+        seg.length_beats = std::stod(entry.substr(eq + 1));
+        segments.push_back(seg);
+    }
+
+    return segments;
+}
+
+std::vector<Attack> SimfileParser::ParseAttacksTag(const std::string& value) {
+    // SM5 Format: entries separated by ':'
+    // Each entry has key=value pairs separated by ':'
+    // e.g. "TIME=1.5:LEN=2.0:MODS=*0.5 xmod,TIME=5.0:LEN=3.0:MODS=drunk"
+    // Or colon-delimited groups: "TIME=1.5:LEN=2.0:MODS=*0.5 xmod:END"
+    std::vector<Attack> attacks;
+    std::string trimmed = Trim(value);
+    if (trimmed.empty()) return attacks;
+
+    // Split by ':'
+    std::vector<std::string> tokens;
+    {
+        std::istringstream stream(trimmed);
+        std::string token;
+        while (std::getline(stream, token, ':')) {
+            tokens.push_back(Trim(token));
+        }
+    }
+
+    // Walk tokens, building attacks from TIME/LEN/MODS groups
+    Attack current;
+    bool has_time = false;
+
+    for (const auto& token : tokens) {
+        if (token.empty() || token == "END") {
+            if (has_time) {
+                attacks.push_back(current);
+                current = Attack{};
+                has_time = false;
+            }
+            continue;
+        }
+
+        size_t eq = token.find('=');
+        if (eq == std::string::npos) continue;
+
+        std::string key = token.substr(0, eq);
+        std::string val = token.substr(eq + 1);
+
+        // Uppercase key for comparison
+        for (auto& c : key) c = static_cast<char>(std::toupper(c));
+
+        if (key == "TIME") {
+            // If we had a previous incomplete attack, push it
+            if (has_time) {
+                attacks.push_back(current);
+                current = Attack{};
+            }
+            current.start_time = std::stod(val);
+            has_time = true;
+        } else if (key == "LEN" || key == "LENGTH") {
+            current.length = std::stod(val);
+        } else if (key == "MODS" || key == "MOD") {
+            current.mods = val;
+        }
+    }
+
+    // Push the last attack if we have one
+    if (has_time) {
+        attacks.push_back(current);
+    }
+
+    return attacks;
+}
+
+std::vector<BGEvent> SimfileParser::ParseBGChangesTag(const std::string& value) {
+    // Format: "beat=file=rate=transition=...,beat=file=rate=transition=..."
+    std::vector<BGEvent> events;
+    std::string trimmed = Trim(value);
+    if (trimmed.empty()) return events;
+
+    std::istringstream stream(trimmed);
+    std::string entry;
+
+    while (std::getline(stream, entry, ',')) {
+        entry = Trim(entry);
+        if (entry.empty()) continue;
+
+        // Split by '='
+        std::vector<std::string> parts;
+        {
+            std::istringstream es(entry);
+            std::string part;
+            while (std::getline(es, part, '=')) {
+                parts.push_back(Trim(part));
+            }
+        }
+
+        if (parts.size() < 2) continue;
+
+        BGEvent ev;
+        try {
+            ev.beat = std::stod(parts[0]);
+            ev.file = parts[1];
+            if (parts.size() >= 3 && !parts[2].empty()) ev.rate = std::stod(parts[2]);
+            if (parts.size() >= 4 && !parts[3].empty()) ev.transition = std::stoi(parts[3]);
+            events.push_back(ev);
+        } catch (...) {
+            // Skip malformed entries
+        }
+    }
+
+    return events;
 }
 
 // ============================================================================

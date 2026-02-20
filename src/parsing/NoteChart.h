@@ -41,6 +41,13 @@ enum class ChartVariant {
 /// For dance-double (8-panel), columns has 8 entries. Etc.
 struct NoteRow {
     double beat = 0.0;                  ///< The beat at which this row occurs
+    double time = 0.0;                  ///< Pre-calculated time in seconds
+    double visual_pos = 0.0;            ///< Pre-calculated visual position
+    
+    /// For HoldHead/RollHead notes: index of the row containing the corresponding HoldTail.
+    /// One entry per column, matches 'columns' size. -1 if not a head or no tail found.
+    std::vector<int> tail_row_indices;
+    
     std::vector<NoteType> columns;      ///< Note type per column/lane
 
     /// Check if this row has any actual notes (not just empty columns).
@@ -109,6 +116,8 @@ struct NoteChart {
     std::vector<TimingSegment> stops;       ///< Chart-specific stop segments
     std::vector<TimingSegment> scrolls;     ///< Chart-specific scroll segments
     std::vector<TimingSegment> speeds;      ///< Chart-specific speed segments
+    std::vector<FakeSegment>   fakes;       ///< Chart-specific fake segments (#FAKES)
+    std::vector<Attack>        attacks;     ///< Chart-specific attacks (#ATTACKS)
 
     bool has_own_timing = false;            ///< True if any chart-level timing was parsed
 
@@ -135,6 +144,11 @@ struct NoteChart {
         if (type == "kb7-single")       return 7;
         // Default to 4
         return 4;
+    }
+
+    /// Returns true if this chart uses 8 lanes (Double, Routine, Couple).
+    [[nodiscard]] bool Is8Lane() const {
+        return chart_type == "dance-double" || chart_type == "dance-routine" || chart_type == "dance-couple";
     }
 
     /// Get the last beat in the chart (beat of the last note row).

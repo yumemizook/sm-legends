@@ -148,6 +148,7 @@ inline Judgement ClassifyHit(double abs_error, bool ex_mode = false) {
 /// Per-lane state for input and visual feedback
 struct LaneState {
     bool     pressed = false;       ///< Key is currently held down
+    bool     just_pressed = false;  ///< Rising edge: true only on the frame the key was pressed
     double   press_flash = 0.0;     ///< Flash intensity (decays each frame)
 
     // Last hit info (for judgement display)
@@ -178,6 +179,12 @@ public:
 
     /// Set custom key bindings (overrides defaults).
     void SetBindings(const std::vector<KeyBinding>& bindings);
+
+    /// Add a single key binding.
+    void AddBinding(const KeyBinding& binding);
+
+    /// Clear all bindings for a specific virtual column.
+    void ClearBindingsForColumn(int column);
 
     /// Set custom gamepad button bindings.
     void SetButtonBindings(const std::unordered_map<SDL_GameControllerButton, int>& bindings);
@@ -319,6 +326,20 @@ inline void InputMapper::SetBindings(const std::vector<KeyBinding>& bindings) {
     }
 }
 
+inline void InputMapper::AddBinding(const KeyBinding& binding) {
+    key_to_column_[binding.key] = binding.column;
+}
+
+inline void InputMapper::ClearBindingsForColumn(int column) {
+    for (auto it = key_to_column_.begin(); it != key_to_column_.end(); ) {
+        if (it->second == column) {
+            it = key_to_column_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 inline void InputMapper::ConfigureForPlayer(const std::string& chart_type, int num_columns, int player_idx) {
     if (player_idx == 0) {
         // P1: use standard bindings but WITHOUT the alt arrow keys (those belong to P2)
@@ -403,6 +424,7 @@ inline int InputMapper::OnKeyDown(SDL_Keycode key) {
     int col = it->second;
     if (col >= 0 && col < num_columns_) {
         lanes_[static_cast<size_t>(col)].pressed = true;
+        lanes_[static_cast<size_t>(col)].just_pressed = true;
         lanes_[static_cast<size_t>(col)].press_flash = 1.0;
     }
     return col;
@@ -426,6 +448,7 @@ inline int InputMapper::OnButtonDown(SDL_GameControllerButton button) {
     int col = it->second;
     if (col >= 0 && col < num_columns_) {
         lanes_[static_cast<size_t>(col)].pressed = true;
+        lanes_[static_cast<size_t>(col)].just_pressed = true;
         lanes_[static_cast<size_t>(col)].press_flash = 1.0;
     }
     return col;
@@ -454,6 +477,8 @@ inline void InputMapper::Update(double dt) {
             lane.judgement_timer -= dt;
             if (lane.judgement_timer < 0.0) lane.judgement_timer = 0.0;
         }
+        // Clear rising-edge flag (consumed this frame)
+        lane.just_pressed = false;
     }
 }
 

@@ -1,0 +1,10 @@
+{
+    "name": "sm-legends",
+    "version-string": "0.1.0",
+    "dependencies": [
+        "sdl2",
+        "sdl2-mixer",
+        "sdl2-ttf",
+        "stb"
+    ]
+}

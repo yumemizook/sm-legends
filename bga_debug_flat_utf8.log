@@ -1,0 +1,39 @@
+﻿AudioEngine: Some audio decoders unavailable: FLAC support not available
+AudioEngine: Initialized (freq=44100, channels=2, chunk=1024)
+Noteskin 'Default' loaded successfully.
+Scanning default 'charts' folder...
+SongScanner: Found 18 simfiles in 'charts'
+SongScanner: 18 songs loaded successfully
+
+--- Song Select Controls ---
+  Up / Down    : Navigate songs
+  Left / Right : Navigate charts
+  Enter        : Play selected chart
+  T            : Load test chart
+  Escape       : Quit
+
+--- Gameplay Controls ---
+  D F J K      : Lane keys (4-key)
+  ZX./         : Alt lane keys (4-key)
+  Arrows       : Alt lane keys (4-key)
+  Space        : Play / Pause
+  R            : Reset to beginning
+  F2 / F3      : Speed up / down
+  Tab          : Toggle X-Mod / C-Mod
+  F4           : Toggle Downscroll
+  F1           : Toggle debug overlay
+  Escape       : Back to song select
+----------------------------
+
+Noteskin 'Default' loaded successfully.
+Player 1 joined! (1 active)
+Playing Song Select charts...
+Playing: U1 High-Speed - EGOISM 440 [dance-single Challenge 30.2]
+AudioEngine: Loaded 'charts\EGOISM 440\EGOISM 440.ogg'
+AudioEngine: Playing at 0.0000s (raw time from SDL_GetPerformanceCounter)
+AudioEngine: Music finished
+Playing Song Select charts...
+Playing: 縺・ｈ繧・- 縺阪ｅ縺・￥繧峨ｊ繧・[dance-single Beginner 1.5]
+AudioEngine: Loaded 'charts\Kyu-kurarin\Kyu-kurarin.ogg'
+AudioEngine: Playing at 0.0000s (raw time from SDL_GetPerformanceCounter)
+AudioEngine: Music finished

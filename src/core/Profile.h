@@ -46,6 +46,11 @@ struct Profile {
     int    effect_mode  = 0;     ///< 0 = Off, 1 = Mirror, 2 = Random
     int    life_type    = 0;     ///< 0 = Standard, 1 = Life4, 2 = Risky, 3 = Flare
     int    flare_level  = 1;     ///< Flare level (1-5)
+    int    combo_display_mode = 1; ///< 0=None, 1=Combo, 2=Additive, 3=Subtractive, etc.
+    float  sudden_plus  = 0.0f;
+    float  hidden_plus  = 0.0f;
+    int    bga_brightness = 1;  ///< 0=Lighter, 1=Normal, 2=Dark, 3=Darker, 4=Darkest
+    bool   ex_mode      = false;
 
     // Rating (separate for single and double)
     double rating_single = 0.0;  ///< Aggregate single-mode rating (avg of top N)
@@ -58,16 +63,18 @@ struct Profile {
     // Rating Calculation
     // ========================================================================
 
-    /// Calculate per-chart rating from chart difficulty and accuracy
-    static double CalculateChartRating(double chart_difficulty, double accuracy) {
-        double score_val = accuracy * 10000.0;
-        double bonus = 0.0;
-        if (score_val >= 1007500.0)      bonus = 2.0 + (score_val - 1007500.0) * 0.0001;
-        else if (score_val >= 1005000.0) bonus = 1.5 + (score_val - 1005000.0) * 0.0002;
-        else if (score_val >= 1000000.0) bonus = 1.0 + (score_val - 1000000.0) * 0.0001;
-        else if (score_val >= 975000.0)  bonus = (score_val - 975000.0) * 0.00004;
-        else                             bonus = (score_val - 975000.0) / 15000.0;
-        return std::max(0.0, chart_difficulty + bonus);
+    /// Calculate per-chart rating from chart difficulty and accuracy percentage (0-101)
+    static double CalculateChartRating(double chart_difficulty, double accuracy_percent) {
+        double score = accuracy_percent * 10000.0;
+        double offset = 0.0;
+
+        if (score >= 1007500.0)      offset = 2.0 + (score - 1007500.0) * 0.0001;
+        else if (score >= 1005000.0) offset = 1.5 + (score - 1005000.0) * 0.0002;
+        else if (score >= 1000000.0) offset = 1.0 + (score - 1000000.0) * 0.0001;
+        else if (score >= 975000.0)  offset = (score - 975000.0) * 0.00004;
+        else                         offset = (score - 975000.0) / 15000.0;
+
+        return std::max(0.0, chart_difficulty + offset);
     }
 
     /// Recalculate rating_single and rating_double from top N chart ratings per mode
@@ -114,6 +121,11 @@ struct Profile {
         std::fprintf(f, "effect_mode=%d\n", effect_mode);
         std::fprintf(f, "life_type=%d\n", life_type);
         std::fprintf(f, "flare_level=%d\n", flare_level);
+        std::fprintf(f, "combo_display_mode=%d\n", combo_display_mode);
+        std::fprintf(f, "sudden_plus=%.2f\n", sudden_plus);
+        std::fprintf(f, "hidden_plus=%.2f\n", hidden_plus);
+        std::fprintf(f, "bga_brightness=%d\n", bga_brightness);
+        std::fprintf(f, "ex_mode=%d\n", ex_mode ? 1 : 0);
         std::fprintf(f, "rating_single=%.4f\n", rating_single);
         std::fprintf(f, "rating_double=%.4f\n", rating_double);
         std::fclose(f);
@@ -155,6 +167,11 @@ struct Profile {
                 else if (skey == "effect_mode")      effect_mode = std::atoi(val);
                 else if (skey == "life_type")        life_type = std::atoi(val);
                 else if (skey == "flare_level")      flare_level = std::atoi(val);
+                else if (skey == "combo_display_mode") combo_display_mode = std::atoi(val);
+                else if (skey == "sudden_plus")      sudden_plus = static_cast<float>(std::atof(val));
+                else if (skey == "hidden_plus")      hidden_plus = static_cast<float>(std::atof(val));
+                else if (skey == "bga_brightness")   bga_brightness = std::atoi(val);
+                else if (skey == "ex_mode")          ex_mode = (std::atoi(val) != 0);
                 else if (skey == "rating_single")    rating_single = std::atof(val);
                 else if (skey == "rating_double")    rating_double = std::atof(val);
                 else if (skey == "overall_rating") {
@@ -203,6 +220,11 @@ struct Profile {
         effect_mode = 0;
         life_type = 0;
         flare_level = 1;
+        combo_display_mode = 1;
+        sudden_plus = 0.0f;
+        hidden_plus = 0.0f;
+        bga_brightness = 1;
+        ex_mode = false;
         rating_single = 0.0;
         rating_double = 0.0;
         high_scores.clear();
