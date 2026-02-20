@@ -1932,7 +1932,6 @@ void GameWindow::ProcessLaneHit(int lane, double forced_time, int p, bool is_rel
             ps.combo++;
             if (ps.combo > ps.max_combo) ps.max_combo = ps.combo;
             ps.combo_pop_timer = 0.15;
-            if (ps.combo > 0 && ps.combo % 100 == 0) ps.grade_popup_timer = 0.2;
         } else {
             ps.combo = 0;
         }
@@ -1960,7 +1959,6 @@ void GameWindow::ProcessLaneHit(int lane, double forced_time, int p, bool is_rel
                 ps.combo++;
                 if (ps.combo > ps.max_combo) ps.max_combo = ps.combo;
                 ps.combo_pop_timer = 0.15;
-                if (ps.combo > 0 && ps.combo % 100 == 0) ps.grade_popup_timer = 0.2;
             } else {
                 ps.combo = 0;
             }
@@ -4600,7 +4598,7 @@ void GameWindow::RenderHitFlashes(const NoteFieldConfig& cfg, const ActiveMods& 
         uint8_t alpha = static_cast<uint8_t>(alpha_ratio * 200);
 
         int x = GetLaneX(hf.lane);
-        int yi = static_cast<int>(cfg.receptor_y);
+        int yi = static_cast<int>(hf.hit_y); // Use actual hit position (early/late)
         int qrow = GetQuantizationRow(hf.beat);
         int frame = 0;
 
@@ -4613,7 +4611,7 @@ void GameWindow::RenderHitFlashes(const NoteFieldConfig& cfg, const ActiveMods& 
 
         SDL_Rect src = { frame * fw, qrow * fh, fw, fh };
         SDL_Rect dst;
-        // Hit flashes (silhouettes) always centered on hit_y
+        // Hit flashes (silhouettes) centered on where note was actually hit
         dst = { x, yi - dh / 2, lane_w, dh };
 
         // Color based on judgement
@@ -4783,17 +4781,17 @@ void GameWindow::RenderJudgement() {
         DrawText(field_center_x - text_width / 2, judge_y - 10, name, jcol, 3);
     }
 
-    // Timing error indicator (FAST/SLOW) 窶・Placed ABOVE the judgement
+    // Timing error indicator (FAST/SLOW) — Placed to the RIGHT of the judgement, above it
     // Hide for highest judgements as per request
     is_highest = (ex_mode_ && last_j == Judgement::PEXTRA) ||
                  (!ex_mode_ && last_j == Judgement::PCRIT);
 
     if (last_j != Judgement::MISS && last_j != Judgement::NONE && !is_highest) {
         std::string err_text = last_err < 0 ? "FAST" : "SLOW";
-        Color err_col = last_err < 0 ? Color{80, 180, 255, static_cast<uint8_t>(200 * alpha_mult)}
-                                                 : Color{255, 100, 100, static_cast<uint8_t>(200 * alpha_mult)};
+        Color err_col = last_err < 0 ? Color{100, 200, 255, static_cast<uint8_t>(255 * alpha_mult)}
+                                             : Color{255, 120, 80, static_cast<uint8_t>(255 * alpha_mult)};
         
-        font_.DrawText(renderer_, field_center_x, judge_y - 50, err_text, err_col, FontSize::SMALL, TextAlign::CENTER);
+        font_.DrawText(renderer_, field_center_x + 90, judge_y - 35, err_text, err_col, FontSize::MEDIUM, TextAlign::LEFT);
     }
 
     // Numeric offset 窶・only when debug overlays are active
@@ -4844,6 +4842,7 @@ void GameWindow::RenderJudgement() {
         // Color based on context
         Color text_col = {255, 255, 255, 255};
         if (is_combo) {
+            // Combo mode: color by lowest judgement in current combo
             switch (lowest_j) {
                 case Judgement::PEXTRA:
                 case Judgement::PCRIT:   text_col = {255, 255, 255, 255}; break; // White
@@ -4855,12 +4854,34 @@ void GameWindow::RenderJudgement() {
                 case Judgement::GOOD:    text_col = {80, 160, 255, 255}; break;  // Blue
                 default: break;
             }
-        } else if (is_score && !is_diff) {
-            // Scoring coloring (for Additive/Subtractive non-diff)
-            if (custom_text[0] == '-') text_col = {255, 80, 80, 255};
-            else if (custom_text[0] == '+') text_col = {100, 255, 100, 255};
+        } else if (pstate.combo_display_mode == ComboDisplayMode::AdditiveScore ||
+                   pstate.combo_display_mode == ComboDisplayMode::SubtractiveScore) {
+            // Score +/- : color by current accuracy grade
+            double acc = 0.0;
+            if (pstate.total_hittable_notes > 0)
+                acc = pstate.normal_score / static_cast<double>(pstate.total_hittable_notes);
+            if (acc >= 100.75)      text_col = {180, 240, 255, 255}; // SSS+ (ice)
+            else if (acc >= 100.0)  text_col = {255, 255, 255, 255}; // SS+ (white)
+            else if (acc >= 97.5)   text_col = {255, 230, 50, 255};  // S   (gold)
+            else if (acc >= 90.0)   text_col = {100, 255, 150, 255}; // A   (green)
+            else if (acc >= 60.0)   text_col = {80, 160, 255, 255};  // B   (blue)
+            else                    text_col = {200, 200, 200, 255}; // below B
+        } else if (pstate.combo_display_mode == ComboDisplayMode::AdditiveEX ||
+                   pstate.combo_display_mode == ComboDisplayMode::SubtractiveEX) {
+            // EX score: light blue
+            text_col = {80, 200, 255, 255};
+        } else if (pstate.combo_display_mode == ComboDisplayMode::HitOffset) {
+            // Hit offset: use the judgement color for that hit
+            text_col = GetJudgementColor(pstate.last_judgement, ex_mode_);
+        } else if (static_cast<int>(pstate.combo_display_mode) >= static_cast<int>(ComboDisplayMode::DiffS) &&
+                   static_cast<int>(pstate.combo_display_mode) <= static_cast<int>(ComboDisplayMode::DiffSSS_Plus)) {
+            // Diff S/SS/SSS borders: purple
+            text_col = {180, 100, 255, 255};
+        } else if (static_cast<int>(pstate.combo_display_mode) >= static_cast<int>(ComboDisplayMode::DiffEX_1Star) &&
+                   static_cast<int>(pstate.combo_display_mode) <= static_cast<int>(ComboDisplayMode::DiffEX_6Star)) {
+            // Diff EX star borders: lighter blue
+            text_col = {180, 240, 255, 255};
         }
-        // Diff modes are forced white as per request
         
         text_col.a = static_cast<uint8_t>(255 * alpha_mult);
         
@@ -6377,6 +6398,27 @@ void GameWindow::UpdateScores(double abs_error, int num_notes, int p) {
         
         // Update Life
         ps.life_meter.OnJudgement(j_norm);
+
+        // --- Grade milestone pop ---
+        // Calculate current accuracy and determine grade tier
+        double total_n = static_cast<double>(ps.total_hittable_notes);
+        if (total_n > 0.0) {
+            double acc = ps.normal_score / total_n;
+            int grade_tier = 0;
+            if (acc >= 100.9)       grade_tier = 8; // SSS+
+            else if (acc >= 100.75) grade_tier = 7; // SSS
+            else if (acc >= 100.5)  grade_tier = 6; // SS+
+            else if (acc >= 100.0)  grade_tier = 5; // SS
+            else if (acc >= 99.0)   grade_tier = 4; // S+
+            else if (acc >= 97.5)   grade_tier = 3; // S
+            else if (acc >= 90.0)   grade_tier = 2; // A
+            else if (acc >= 60.0)   grade_tier = 1; // B
+
+            if (grade_tier > ps.last_grade_milestone) {
+                ps.last_grade_milestone = grade_tier;
+                ps.grade_popup_timer = 0.2;
+            }
+        }
 
         // Check for Fail
         if (ps.life_meter.IsFailed() && !ps.failed_sequence) {
