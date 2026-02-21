@@ -225,6 +225,8 @@ struct PlayerState {
     bool   failed_sequence      = false;
     double fail_animation_timer = 0.0;
     
+    double clear_animation_timer = 0.0;
+    
     // Independent chart state
     const NoteChart* current_chart = nullptr;
     NoteChart runtime_chart;
@@ -289,6 +291,7 @@ struct PlayerState {
         grade_popup_timer = 0.0;
         failed_sequence = false;
         fail_animation_timer = 0.0;
+        clear_animation_timer = 0.0;
         clear_type = ClearType::ALL_PERFECT_EXTRAORDINARY;
         lowest_judgement_in_combo = Judgement::NONE;
         combo_pop_timer = 0.0;
@@ -540,6 +543,9 @@ private:
     std::map<std::string, SDL_Texture*> bga_textures_;
 
     // --- Current BGA State ---
+    std::map<std::string, SDL_Texture*> diff_textures_;
+    std::map<std::string, SDL_Texture*> playtype_textures_;
+
     SDL_Texture* current_bga_tex_ = nullptr;
     std::string current_bga_file_;
     std::string auto_bga_file_; // Discovered video file when #BGCHANGES is missing
@@ -552,9 +558,12 @@ private:
 
     // Song select state
     int  selected_song_  = 0;
+    std::vector<int> filtered_songs_; // Maps wheel index -> scanner index
+    void UpdateFilteredSongs();
     int  selected_chart_[MAX_PLAYERS] = {0, 0};
     int  scroll_offset_  = 0;
     int  visible_songs_  = 12;
+    int  preferred_mode_  = 0;  ///< 0 = Single, 1 = Double (toggled by Tab in Song Select)
     
     // Legacy/Shared mod state (to be replaced by per-player)
     bool   showing_modifier_menu_ = false;

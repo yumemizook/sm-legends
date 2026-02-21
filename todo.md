@@ -1,10 +1,7 @@
-1. the silhouette of the note when it is hit must match where it is hit on the receptor (early/late) instead of defaulting to the center of the receptor
-2. return proper coloring for the combo numbers:
-     if Combo is chosen, the color is determined by the lowest judgement obtained in that combo; 
-     if any of the Score +/- is used, the color is the color of the current grade based on the score value.
-     If Diff S/SS/SSS/etc. is chosen, the color is purple.
-     If EX score +/- is used, it is light blue.
-     If Diff 1*/2*/etc. is used, it is a lighter blue.
-     if hit offset is used, it is the color of the judgement bound to that value.
-3. Make the FAST/SLOW text more stand out, and place them on the right side of the judgement, above it.
-4. Restore the proper 'pop' animation for when a new grade is obtained in the Score display.
+1. Add a way to switch between Single/Double mode after the game has started, and when the profile is chosen.
+2. Filter out the Single chart if Double is selected, and vice-versa. Couple/Routine/Wild charts are still displayed regardless of the Single/Double configuration.
+3. Change the folder structure so that charts are categorized according to Genre (as well as a special folder for Wild charts.)
+4. Allow returning the the Attract screen and choose another profile, as well as allowing 2P late join.
+5. Make sure that the rating is saved and preserved across each session.
+6. Change the custom meter label to only display whole numbers, and with a small '+' symbol if the internal calculated constant is above .5
+7. Standardize the controls in the mod menu to use the bound directional keys instead of the hardcoded ones.

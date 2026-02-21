@@ -255,6 +255,24 @@ bool GameWindow::Init(int width, int height, const std::string& title) {
     hold_ng_texture_   = LoadTexture("sprites/holds/ng.png",   &hold_judge_w_, &hold_judge_h_);
     hold_bad_texture_  = LoadTexture("sprites/holds/bad.png",  &hold_judge_w_, &hold_judge_h_);
 
+    // Difficulty Icons
+    const std::vector<std::string> diffs = {"advanced", "basic", "beginner", "challenge", "expert", "wild"};
+    for (const auto& d : diffs) {
+        std::string path = "sprites/playtype/diff/" + d + ".png";
+        int w, h;
+        SDL_Texture* tex = LoadTexture(path, &w, &h);
+        if (tex) diff_textures_[d] = tex;
+    }
+
+    // Playtype Icons
+    const std::vector<std::string> ptypes = {"single", "double", "routine", "couple"};
+    for (const auto& pt : ptypes) {
+        std::string path = "sprites/playtype/playercount/" + pt + ".png";
+        int w, h;
+        SDL_Texture* tex = LoadTexture(path, &w, &h);
+        if (tex) playtype_textures_[pt] = tex;
+    }
+
     // Load Settings (Keybinds, etc)
     LoadSettings();
     ApplyInputBindings();
@@ -266,10 +284,39 @@ int GameWindow::ScanSongs(const std::string& songs_path) {
     int count = scanner_.ScanDirectory(songs_path);
     if (count > 0) {
         // Don't force SONG_SELECT here 窶・let the Attraction screen handle transitions
+        UpdateFilteredSongs();
         selected_song_ = 0;
         for (int p = 0; p < MAX_PLAYERS; ++p) selected_chart_[p] = 0;
     }
     return count;
+}
+
+void GameWindow::UpdateFilteredSongs() {
+    filtered_songs_.clear();
+    const auto& songs = scanner_.GetSongs();
+    
+    for (size_t i = 0; i < songs.size(); ++i) {
+        bool has_valid = false;
+        for (const auto& chart : songs[i].charts) {
+            bool is_couple = (chart.chart_type == "dance-routine" || chart.chart_type == "dance-couple");
+            bool is_wild = (chart.variant == ChartVariant::Wild);
+            if (!is_couple && !is_wild) {
+                if (preferred_mode_ == 0 && chart.chart_type == "dance-double") continue;
+                if (preferred_mode_ == 1 && chart.chart_type == "dance-single") continue;
+            }
+            has_valid = true;
+            break;
+        }
+        if (has_valid) {
+            filtered_songs_.push_back(static_cast<int>(i));
+        }
+    }
+    
+    if (filtered_songs_.empty()) {
+        selected_song_ = 0;
+    } else if (selected_song_ >= static_cast<int>(filtered_songs_.size())) {
+        selected_song_ = 0;
+    }
 }
 
 bool GameWindow::LoadSimfile(const std::string& filepath, int chart_index) {
@@ -492,9 +539,29 @@ void GameWindow::HandleKeyUp(SDL_Keycode key) {
 }
 
 void GameWindow::HandleKeyDown_SongSelect(SDL_Keycode key) {
-    int song_count = static_cast<int>(scanner_.GetSongCount());
-    if (song_count == 0 && key == SDLK_ESCAPE) { running_ = false; return; }
-    if (song_count == 0) return;
+    int song_count = static_cast<int>(filtered_songs_.size());
+    if (song_count == 0 && key == SDLK_ESCAPE) { 
+        for (int i = 0; i < MAX_PLAYERS; ++i) UnjoinPlayer(i);
+        ChangeScreen(ScreenState::ATTRACTION);
+        return; 
+    }
+    if (song_count == 0) {
+        if (key == SDLK_TAB) {
+            preferred_mode_ = (preferred_mode_ == 0) ? 1 : 0;
+            UpdateFilteredSongs();
+        }
+        return;
+    }
+
+    // --- Late Join: Check if an unjoined player pressed Start ---
+    for (int p = 0; p < MAX_PLAYERS; ++p) {
+        if (players_[p].joined) continue;
+        int lane = players_[p].input.OnKeyDown(key);
+        if (lane == InputMapper::COL_START) {
+            JoinPlayer(p);
+            return;
+        }
+    }
 
     // --- Per-player input routing ---
     for (int p = 0; p < MAX_PLAYERS; ++p) {
@@ -526,18 +593,26 @@ void GameWindow::HandleKeyDown_SongSelect(SDL_Keycode key) {
             }
 
             if (double_tap) {
-                const auto& song = scanner_.GetSongs()[static_cast<size_t>(selected_song_)];
+                const auto& song = scanner_.GetSongs()[filtered_songs_[selected_song_]];
                 int chart_count = static_cast<int>(song.charts.size());
                 if (chart_count > 0) {
-                    // Filter logic: if 2P joined, skip 8-lane charts
+                    // Filter logic: skip 8-lane charts in 2P, and skip charts not matching preferred mode
                     int step = (lane == 2) ? -1 : 1;
                     int next = (selected_chart_[p] + step + chart_count) % chart_count;
                     
-                    if (num_active_players_ >= 2) {
-                        for (int i = 0; i < chart_count; ++i) {
-                            if (!song.charts[next].Is8Lane()) break;
-                            next = (next + step + chart_count) % chart_count;
+                    for (int i = 0; i < chart_count; ++i) {
+                        const auto& nc = song.charts[next];
+                        bool skip = false;
+                        if (num_active_players_ >= 2 && nc.Is8Lane()) skip = true;
+                        // Apply preferred mode filter (Couple/Routine/Wild always visible)
+                        bool is_couple = (nc.chart_type == "dance-routine" || nc.chart_type == "dance-couple");
+                        bool is_wild = (nc.variant == ChartVariant::Wild);
+                        if (!is_couple && !is_wild) {
+                            if (preferred_mode_ == 0 && nc.chart_type == "dance-double") skip = true;
+                            if (preferred_mode_ == 1 && nc.chart_type == "dance-single") skip = true;
                         }
+                        if (!skip) break;
+                        next = (next + step + chart_count) % chart_count;
                     }
                     selected_chart_[p] = next;
 
@@ -563,7 +638,7 @@ void GameWindow::HandleKeyDown_SongSelect(SDL_Keycode key) {
             if (all_ready) {
                 // If all ready, proceed to transition
                 StartGameplay(
-                    static_cast<size_t>(selected_song_),
+                    static_cast<size_t>(filtered_songs_[selected_song_]),
                     static_cast<size_t>(selected_chart_[0]));
             }
             return;
@@ -572,11 +647,26 @@ void GameWindow::HandleKeyDown_SongSelect(SDL_Keycode key) {
 
     switch (key) {
         case SDLK_ESCAPE:
-            running_ = false;
+            // Return to Attract screen, unjoin all players
+            for (int i = 0; i < MAX_PLAYERS; ++i) {
+                UnjoinPlayer(i);
+            }
+            ChangeScreen(ScreenState::ATTRACTION);
             break;
 
         case SDLK_t:
             LoadTestChart();
+            break;
+
+        case SDLK_TAB:
+            // Toggle preferred mode: Single <-> Double
+            preferred_mode_ = (preferred_mode_ == 0) ? 1 : 0;
+            UpdateFilteredSongs();
+            // Reset chart selections when toggling
+            for (int i = 0; i < MAX_PLAYERS; ++i) {
+                selected_chart_[i] = 0;
+                players_[i].ready = false;
+            }
             break;
     }
 }
@@ -756,141 +846,138 @@ void GameWindow::HandleModifierMenuInput(int p, SDL_Keycode key) {
     auto& ps = players_[p];
     if (!ps.showing_modifier_menu) return;
     int num_items = 12; // Speed, Type, Scroll, Sudden, Hidden, Skin, Effect, Life, Score, Center, Combo, BGA
-    
-    switch (key) {
-        case SDLK_UP:
-            ps.modifier_menu_cursor = (ps.modifier_menu_cursor - 1 + num_items) % num_items;
-            break;
-        case SDLK_DOWN:
-            ps.modifier_menu_cursor = (ps.modifier_menu_cursor + 1) % num_items;
-            break;
-        case SDLK_LEFT: {
-            switch (ps.modifier_menu_cursor) {
-                case 0: { // Speed
-                    if (ps.field_config.mod_type == ScrollModType::CMod)
-                        ps.field_config.speed_mod = std::max(50.0, ps.field_config.speed_mod - 50.0);
-                    else
-                        ps.field_config.speed_mod = std::max(0.25, ps.field_config.speed_mod - 0.25);
-                } break;
-                case 1: // Mod Type
-                    ps.field_config.mod_type = (ps.field_config.mod_type == ScrollModType::XMod) ? ScrollModType::CMod : ScrollModType::XMod;
-                    ps.field_config.speed_mod = (ps.field_config.mod_type == ScrollModType::XMod) ? 2.0 : 400.0;
-                    break;
-                case 2: // Scroll
-                    ps.field_config.downscroll = !ps.field_config.downscroll;
-                    ps.field_config.receptor_y = ps.field_config.downscroll ? height_ * 0.85 : height_ * 0.15;
-                    break;
-                case 3: // Sudden+
-                    ps.sudden_plus_val = std::max(0.0f, ps.sudden_plus_val - 0.05f);
-                    break;
-                case 4: // Hidden+
-                    ps.hidden_plus_val = std::max(0.0f, ps.hidden_plus_val - 0.05f);
-                    break;
-                case 5: // Noteskin
-                    if (!available_noteskins_.empty()) {
-                        ps.noteskin_index = (ps.noteskin_index - 1 + (int)available_noteskins_.size()) % (int)available_noteskins_.size();
-                        if (p == active_player_idx_) LoadNoteskin(available_noteskins_[ps.noteskin_index]);
-                    }
-                    break;
-                case 6: // Effects
-                    ps.effect_mode = (ps.effect_mode - 1 + 3) % 3;
-                    break;
-                case 7: { // Life Mode
-                    int flare = ps.life_meter.GetFlareLevel();
-                    if (ps.life_meter.GetType() == LifeType::STANDARD) ps.life_meter.Init(LifeType::FLARE, 5);
-                    else if (ps.life_meter.GetType() == LifeType::LIFE4) ps.life_meter.Init(LifeType::STANDARD);
-                    else if (ps.life_meter.GetType() == LifeType::RISKY) ps.life_meter.Init(LifeType::LIFE4);
-                    else if (ps.life_meter.GetType() == LifeType::FLARE) {
-                        if (flare > 1) ps.life_meter.Init(LifeType::FLARE, flare - 1);
-                        else ps.life_meter.Init(LifeType::RISKY);
-                    }
-                } break;
-                case 8: // Scoring
-                    ps.ex_mode = !ps.ex_mode;
-                    break;
-                case 9: // Center 1P
-                    if (p == 0) {
-                        center_1p_ = !center_1p_;
-                        SetupPlayerFieldLayout();
-                    }
-                    break;
-                case 10: // Combo Display
-                    ps.combo_display_mode = static_cast<ComboDisplayMode>((static_cast<int>(ps.combo_display_mode) - 1 + 19) % 19);
-                    break;
-                case 11: // BGA Brightness
-                    ps.bga_brightness = static_cast<BGABrightness>((static_cast<int>(ps.bga_brightness) - 1 + 5) % 5);
-                    break;
-                default: break;
-            }
-            break;
+
+    // Resolve direction from player-bound keys (lanes 0=Left, 1=Down, 2=Up, 3=Right)
+    int lane = ps.input.OnKeyDown(key);
+    bool is_up    = (lane == 2);
+    bool is_down  = (lane == 1);
+    bool is_left  = (lane == 0);
+    bool is_right = (lane == 3);
+    bool is_start = (lane == InputMapper::COL_START);
+    bool is_escape = (key == SDLK_ESCAPE);
+
+    if (is_up) {
+        ps.modifier_menu_cursor = (ps.modifier_menu_cursor - 1 + num_items) % num_items;
+    } else if (is_down) {
+        ps.modifier_menu_cursor = (ps.modifier_menu_cursor + 1) % num_items;
+    } else if (is_left) {
+        switch (ps.modifier_menu_cursor) {
+            case 0: { // Speed
+                if (ps.field_config.mod_type == ScrollModType::CMod)
+                    ps.field_config.speed_mod = std::max(50.0, ps.field_config.speed_mod - 50.0);
+                else
+                    ps.field_config.speed_mod = std::max(0.25, ps.field_config.speed_mod - 0.25);
+            } break;
+            case 1: // Mod Type
+                ps.field_config.mod_type = (ps.field_config.mod_type == ScrollModType::XMod) ? ScrollModType::CMod : ScrollModType::XMod;
+                ps.field_config.speed_mod = (ps.field_config.mod_type == ScrollModType::XMod) ? 2.0 : 400.0;
+                break;
+            case 2: // Scroll
+                ps.field_config.downscroll = !ps.field_config.downscroll;
+                ps.field_config.receptor_y = ps.field_config.downscroll ? height_ * 0.85 : height_ * 0.15;
+                break;
+            case 3: // Sudden+
+                ps.sudden_plus_val = std::max(0.0f, ps.sudden_plus_val - 0.05f);
+                break;
+            case 4: // Hidden+
+                ps.hidden_plus_val = std::max(0.0f, ps.hidden_plus_val - 0.05f);
+                break;
+            case 5: // Noteskin
+                if (!available_noteskins_.empty()) {
+                    ps.noteskin_index = (ps.noteskin_index - 1 + (int)available_noteskins_.size()) % (int)available_noteskins_.size();
+                    if (p == active_player_idx_) LoadNoteskin(available_noteskins_[ps.noteskin_index]);
+                }
+                break;
+            case 6: // Effects
+                ps.effect_mode = (ps.effect_mode - 1 + 3) % 3;
+                break;
+            case 7: { // Life Mode
+                int flare = ps.life_meter.GetFlareLevel();
+                if (ps.life_meter.GetType() == LifeType::STANDARD) ps.life_meter.Init(LifeType::FLARE, 5);
+                else if (ps.life_meter.GetType() == LifeType::LIFE4) ps.life_meter.Init(LifeType::STANDARD);
+                else if (ps.life_meter.GetType() == LifeType::RISKY) ps.life_meter.Init(LifeType::LIFE4);
+                else if (ps.life_meter.GetType() == LifeType::FLARE) {
+                    if (flare > 1) ps.life_meter.Init(LifeType::FLARE, flare - 1);
+                    else ps.life_meter.Init(LifeType::RISKY);
+                }
+            } break;
+            case 8: // Scoring
+                ps.ex_mode = !ps.ex_mode;
+                break;
+            case 9: // Center 1P
+                if (p == 0) {
+                    center_1p_ = !center_1p_;
+                    SetupPlayerFieldLayout();
+                }
+                break;
+            case 10: // Combo Display
+                ps.combo_display_mode = static_cast<ComboDisplayMode>((static_cast<int>(ps.combo_display_mode) - 1 + 19) % 19);
+                break;
+            case 11: // BGA Brightness
+                ps.bga_brightness = static_cast<BGABrightness>((static_cast<int>(ps.bga_brightness) - 1 + 5) % 5);
+                break;
+            default: break;
         }
-        case SDLK_RIGHT:
-        case SDLK_RETURN:
-        case SDLK_KP_ENTER: {
-            switch (ps.modifier_menu_cursor) {
-                case 0: { // Speed
-                    if (ps.field_config.mod_type == ScrollModType::CMod)
-                        ps.field_config.speed_mod += 50.0;
-                    else
-                        ps.field_config.speed_mod += 0.25;
-                } break;
-                case 1: // Mod Type
-                    ps.field_config.mod_type = (ps.field_config.mod_type == ScrollModType::XMod) ? ScrollModType::CMod : ScrollModType::XMod;
-                    ps.field_config.speed_mod = (ps.field_config.mod_type == ScrollModType::XMod) ? 2.0 : 400.0;
-                    break;
-                case 2: // Scroll
-                    ps.field_config.downscroll = !ps.field_config.downscroll;
-                    ps.field_config.receptor_y = ps.field_config.downscroll ? height_ * 0.85 : height_ * 0.15;
-                    break;
-                case 3: // Sudden+
-                    ps.sudden_plus_val = std::min(0.8f, ps.sudden_plus_val + 0.05f);
-                    break;
-                case 4: // Hidden+
-                    ps.hidden_plus_val = std::min(0.8f, ps.hidden_plus_val + 0.05f);
-                    break;
-                case 5: // Noteskin
-                    if (!available_noteskins_.empty()) {
-                        ps.noteskin_index = (ps.noteskin_index + 1) % (int)available_noteskins_.size();
-                        if (p == active_player_idx_) LoadNoteskin(available_noteskins_[ps.noteskin_index]);
-                    }
-                    break;
-                case 6: // Effects
-                    ps.effect_mode = (ps.effect_mode + 1) % 3;
-                    break;
-                case 7: { // Life Mode
-                    int flare = ps.life_meter.GetFlareLevel();
-                    if (ps.life_meter.GetType() == LifeType::STANDARD) ps.life_meter.Init(LifeType::LIFE4);
-                    else if (ps.life_meter.GetType() == LifeType::LIFE4) ps.life_meter.Init(LifeType::RISKY);
-                    else if (ps.life_meter.GetType() == LifeType::RISKY) ps.life_meter.Init(LifeType::FLARE, 1);
-                    else if (ps.life_meter.GetType() == LifeType::FLARE) {
-                        if (flare < 5) ps.life_meter.Init(LifeType::FLARE, flare + 1);
-                        else ps.life_meter.Init(LifeType::STANDARD);
-                    }
-                } break;
-                case 8: // Scoring
-                    ps.ex_mode = !ps.ex_mode;
-                    break;
-                case 9: // Center 1P
-                    if (p == 0) {
-                        center_1p_ = !center_1p_;
-                        SetupPlayerFieldLayout();
-                    }
-                    break;
-                case 10: // Combo Display
-                    ps.combo_display_mode = static_cast<ComboDisplayMode>((static_cast<int>(ps.combo_display_mode) + 1) % 19);
-                    break;
-                case 11: // BGA Brightness
-                    ps.bga_brightness = static_cast<BGABrightness>((static_cast<int>(ps.bga_brightness) + 1) % 5);
-                    break;
-                default: break;
-            }
-            break;
+    } else if (is_right || is_start) {
+        switch (ps.modifier_menu_cursor) {
+            case 0: { // Speed
+                if (ps.field_config.mod_type == ScrollModType::CMod)
+                    ps.field_config.speed_mod += 50.0;
+                else
+                    ps.field_config.speed_mod += 0.25;
+            } break;
+            case 1: // Mod Type
+                ps.field_config.mod_type = (ps.field_config.mod_type == ScrollModType::XMod) ? ScrollModType::CMod : ScrollModType::XMod;
+                ps.field_config.speed_mod = (ps.field_config.mod_type == ScrollModType::XMod) ? 2.0 : 400.0;
+                break;
+            case 2: // Scroll
+                ps.field_config.downscroll = !ps.field_config.downscroll;
+                ps.field_config.receptor_y = ps.field_config.downscroll ? height_ * 0.85 : height_ * 0.15;
+                break;
+            case 3: // Sudden+
+                ps.sudden_plus_val = std::min(0.8f, ps.sudden_plus_val + 0.05f);
+                break;
+            case 4: // Hidden+
+                ps.hidden_plus_val = std::min(0.8f, ps.hidden_plus_val + 0.05f);
+                break;
+            case 5: // Noteskin
+                if (!available_noteskins_.empty()) {
+                    ps.noteskin_index = (ps.noteskin_index + 1) % (int)available_noteskins_.size();
+                    if (p == active_player_idx_) LoadNoteskin(available_noteskins_[ps.noteskin_index]);
+                }
+                break;
+            case 6: // Effects
+                ps.effect_mode = (ps.effect_mode + 1) % 3;
+                break;
+            case 7: { // Life Mode
+                int flare = ps.life_meter.GetFlareLevel();
+                if (ps.life_meter.GetType() == LifeType::STANDARD) ps.life_meter.Init(LifeType::LIFE4);
+                else if (ps.life_meter.GetType() == LifeType::LIFE4) ps.life_meter.Init(LifeType::RISKY);
+                else if (ps.life_meter.GetType() == LifeType::RISKY) ps.life_meter.Init(LifeType::FLARE, 1);
+                else if (ps.life_meter.GetType() == LifeType::FLARE) {
+                    if (flare < 5) ps.life_meter.Init(LifeType::FLARE, flare + 1);
+                    else ps.life_meter.Init(LifeType::STANDARD);
+                }
+            } break;
+            case 8: // Scoring
+                ps.ex_mode = !ps.ex_mode;
+                break;
+            case 9: // Center 1P
+                if (p == 0) {
+                    center_1p_ = !center_1p_;
+                    SetupPlayerFieldLayout();
+                }
+                break;
+            case 10: // Combo Display
+                ps.combo_display_mode = static_cast<ComboDisplayMode>((static_cast<int>(ps.combo_display_mode) + 1) % 19);
+                break;
+            case 11: // BGA Brightness
+                ps.bga_brightness = static_cast<BGABrightness>((static_cast<int>(ps.bga_brightness) + 1) % 5);
+                break;
+            default: break;
         }
-        case SDLK_ESCAPE:
-            ps.showing_modifier_menu = false;
-            SaveActiveProfile(p);
-            SaveSettings();
-            break;
+    } else if (is_escape) {
+        ps.showing_modifier_menu = false;
     }
     SaveSettings(); // Save settings after any change in the menu
     SaveActiveProfile(p);
@@ -1083,8 +1170,6 @@ void GameWindow::StartGameplay(size_t song_index, size_t chart_index) {
     }
     active_simfile_ = scanner_.GetSongs()[song_index].simfile.get();
     if (!active_simfile_ || active_simfile_->charts.empty()) return;
-    
-    selected_song_ = static_cast<int>(song_index);
     
     // Primary chart for conductor timing (use P1 or first joined player)
     int master_p = -1;
@@ -1476,7 +1561,7 @@ void GameWindow::ShowResults() {
         else if (ex_acc >= 73.0)  stars = 2;
         else if (ex_acc >= 60.0)  stars = 1;
 
-        std::string score_key = scanner_.GetSongs()[static_cast<size_t>(selected_song_)].filepath + "|" + std::to_string(selected_chart_[0]);
+        std::string score_key = scanner_.GetSongs()[filtered_songs_[selected_song_]].filepath + "|" + std::to_string(selected_chart_[0]);
         auto it = high_scores_.find(score_key);
         if (it == high_scores_.end() || normal_acc > it->second.percentage) {
             high_scores_[score_key] = { normal_acc, ex_acc, stars, grade, max_combo_ };
@@ -1932,8 +2017,14 @@ void GameWindow::ProcessLaneHit(int lane, double forced_time, int p, bool is_rel
             ps.combo++;
             if (ps.combo > ps.max_combo) ps.max_combo = ps.combo;
             ps.combo_pop_timer = 0.15;
+            if (ps.combo == 1) {
+                ps.lowest_judgement_in_combo = j_target;
+            } else if (j_target > ps.lowest_judgement_in_combo) {
+                ps.lowest_judgement_in_combo = j_target;
+            }
         } else {
             ps.combo = 0;
+            ps.lowest_judgement_in_combo = Judgement::NONE;
         }
     } else {
         // Standard: Chord cohesion check
@@ -1959,8 +2050,14 @@ void GameWindow::ProcessLaneHit(int lane, double forced_time, int p, bool is_rel
                 ps.combo++;
                 if (ps.combo > ps.max_combo) ps.max_combo = ps.combo;
                 ps.combo_pop_timer = 0.15;
+                if (ps.combo == 1) {
+                    ps.lowest_judgement_in_combo = j_target;
+                } else if (j_target > ps.lowest_judgement_in_combo) {
+                    ps.lowest_judgement_in_combo = j_target;
+                }
             } else {
                 ps.combo = 0;
+                ps.lowest_judgement_in_combo = Judgement::NONE;
             }
 
             // Sync legacy for active player
@@ -2037,6 +2134,41 @@ void GameWindow::Update(double dt) {
     }
     if (screen_ == ScreenState::PROFILE_LOAD) {
         UpdateProfileLoad(dt);
+        return;
+    }
+
+    if (screen_ == ScreenState::SONG_SELECT && !is_transitioning_) {
+        // Fast scrolling via holding Left/Right
+        static double scroll_timer = 0.0;
+        static double repeat_timer = 0.0;
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        bool left_held = keys[SDL_SCANCODE_LEFT];
+        bool right_held = keys[SDL_SCANCODE_RIGHT];
+        
+        // Prevent fast scroll if they are holding both or neither
+        if (left_held ^ right_held) {
+            scroll_timer += dt;
+            if (scroll_timer > 0.4) { // Initial delay before fast scroll kicks in
+                repeat_timer += dt;
+                if (repeat_timer > 0.05) { // Repeat rate (approx 20 per second)
+                    repeat_timer = 0.0;
+                    int song_count = static_cast<int>(filtered_songs_.size());
+                    if (song_count > 0) {
+                        if (left_held) selected_song_ = (selected_song_ - 1 + song_count) % song_count;
+                        else           selected_song_ = (selected_song_ + 1) % song_count;
+                        
+                        // Reset chart selection when song changes
+                        for (int i = 0; i < MAX_PLAYERS; ++i) {
+                            selected_chart_[i] = 0;
+                            players_[i].ready = false;
+                        }
+                    }
+                }
+            }
+        } else {
+            scroll_timer = 0.0;
+            repeat_timer = 0.0;
+        }
         return;
     }
 
@@ -2354,10 +2486,18 @@ void GameWindow::Update(double dt) {
                 play_time_ > ps.chart_end_time) {
                 ps.chart_finished = true;
                 ps.results_delay = (ps.clear_type >= ClearType::FULL_COMBO) ? 4.5 : 1.5;
+                if (ps.clear_type >= ClearType::FULL_COMBO) {
+                    ps.clear_animation_timer = 3.0;
+                }
             }
 
             if (ps.failed_sequence) {
                 ps.fail_animation_timer += dt;
+            }
+
+            if (ps.clear_animation_timer > 0.0) {
+                ps.clear_animation_timer -= dt;
+                if (ps.clear_animation_timer < 0.0) ps.clear_animation_timer = 0.0;
             }
 
             // --- Life Gauge Animations ---
@@ -3322,13 +3462,48 @@ void GameWindow::RenderCalibration() {
 }
 
 void GameWindow::RenderSongSelect() {
-    // Dark-Navy Gradient Background (matching gameplay but brighter)
-    for (int y = 0; y < height_; ++y) {
-        uint8_t r = static_cast<uint8_t>(20 + (y * 10 / height_));
-        uint8_t g = static_cast<uint8_t>(20 + (y * 10 / height_));
-        uint8_t b = static_cast<uint8_t>(40 + (y * 20 / height_));
-        SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
-        SDL_RenderDrawLine(renderer_, 0, y, width_, y);
+    // --- Dynamic Background ---
+    SDL_Texture* bg_jacket = nullptr;
+    const auto& songs = scanner_.GetSongs();
+    if (!songs.empty() && !filtered_songs_.empty() && selected_song_ < static_cast<int>(filtered_songs_.size())) {
+        const auto& song = songs[filtered_songs_[selected_song_]];
+        bg_jacket = GetJacketTexture(song.jacket_path);
+    }
+    
+    if (bg_jacket) {
+        // Draw the jacket scaled to fill the screen, but we want a "blurred/darkened" effect.
+        // We'll simulate blur by drawing it slightly larger and heavily darkened.
+        int jw, jh;
+        SDL_QueryTexture(bg_jacket, nullptr, nullptr, &jw, &jh);
+        double screen_aspect = static_cast<double>(width_) / height_;
+        double jacket_aspect = static_cast<double>(jw) / jh;
+        
+        SDL_Rect bg_dest;
+        if (jacket_aspect > screen_aspect) {
+            // Jacket is wider than screen aspect -> match height, crop width
+            int w = static_cast<int>(height_ * jacket_aspect);
+            bg_dest = { (width_ - w) / 2, 0, w, height_ };
+        } else {
+            // Jacket is taller than screen aspect -> match width, crop height
+            int h = static_cast<int>(width_ / jacket_aspect);
+            bg_dest = { 0, (height_ - h) / 2, width_, h };
+        }
+        
+        SDL_SetTextureColorMod(bg_jacket, 80, 80, 100); // Darken and tint slightly blue/purple
+        SDL_RenderCopy(renderer_, bg_jacket, nullptr, &bg_dest);
+        SDL_SetTextureColorMod(bg_jacket, 255, 255, 255); // Reset
+        
+        // Add a dark overlay to further push it into the background and ensure text is readable
+        DrawRect(0, 0, width_, height_, {10, 15, 25, 200});
+    } else {
+        // Fallback Dark-Navy Gradient Background
+        for (int y = 0; y < height_; ++y) {
+            uint8_t r = static_cast<uint8_t>(20 + (y * 10 / height_));
+            uint8_t g = static_cast<uint8_t>(20 + (y * 10 / height_));
+            uint8_t b = static_cast<uint8_t>(40 + (y * 20 / height_));
+            SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
+            SDL_RenderDrawLine(renderer_, 0, y, width_, y);
+        }
     }
 
     RenderSongList();
@@ -3343,13 +3518,13 @@ void GameWindow::RenderSongSelect() {
 
 void GameWindow::RenderSongList() {
     const auto& songs = scanner_.GetSongs();
-    int count = static_cast<int>(songs.size());
+    int count = static_cast<int>(filtered_songs_.size());
 
     if (count == 0) {
-        int w1 = GetTextWidth("no songs found", 3);
-        DrawText(width_ / 2 - w1 / 2, height_ / 2 - 20, "no songs found", {200, 100, 100, 255}, 3);
-        int w2 = GetTextWidth("press t for test chart", 2);
-        DrawText(width_ / 2 - w2 / 2, height_ / 2 + 20, "press t for test chart", {140, 140, 160, 200}, 2);
+        int w1 = GetTextWidth("no songs found for this mode", 3);
+        DrawText(width_ / 2 - w1 / 2, height_ / 2 - 20, "no songs found for this mode", {200, 100, 100, 255}, 3);
+        int w2 = GetTextWidth("press tab to switch mode", 2);
+        DrawText(width_ / 2 - w2 / 2, height_ / 2 + 20, "press tab to switch mode", {140, 140, 160, 200}, 2);
         return;
     }
 
@@ -3385,7 +3560,7 @@ void GameWindow::RenderSongList() {
                 continue;
             }
 
-            const auto& song = songs[static_cast<size_t>(song_idx)];
+            const auto& song = songs[filtered_songs_[song_idx]];
             
             int x = grid_left + c * (jacket_size + spacing);
             int y = grid_top + (r + 2) * (jacket_size + spacing); // r+2 maps -2..2 to 0..4
@@ -3458,10 +3633,11 @@ void GameWindow::RenderSongList() {
 }
 
 void GameWindow::RenderChartPanel(int p) {
+    if (filtered_songs_.empty() || selected_song_ >= static_cast<int>(filtered_songs_.size())) return;
     const auto& songs = scanner_.GetSongs();
     if (songs.empty()) return;
 
-    const auto& song = songs[static_cast<size_t>(selected_song_)];
+    const auto& song = songs[filtered_songs_[selected_song_]];
 
     // Position based on player
     int panel_width = 240;
@@ -3477,6 +3653,15 @@ void GameWindow::RenderChartPanel(int p) {
         // Skip 8-lane charts in 2P
         if (num_active_players_ >= 2 && chart.Is8Lane()) continue;
 
+        // Filter by preferred mode (Single/Double toggle)
+        // Couple, Routine, and Wild charts are always shown
+        bool is_couple = (chart.chart_type == "dance-routine" || chart.chart_type == "dance-couple");
+        bool is_wild = (chart.variant == ChartVariant::Wild);
+        if (!is_couple && !is_wild) {
+            if (preferred_mode_ == 0 && chart.chart_type == "dance-double") continue; // Hide Double in Single mode
+            if (preferred_mode_ == 1 && chart.chart_type == "dance-single") continue; // Hide Single in Double mode
+        }
+
         bool selected = (static_cast<int>(ci) == selected_chart_[p]);
         Color diff_col = GetDifficultyColor(chart.difficulty_name);
         
@@ -3484,36 +3669,41 @@ void GameWindow::RenderChartPanel(int p) {
             diff_col = Color::Rainbow(SDL_GetTicks() / 1000.0, 0.7f, 0.6f);
         }
 
-        int row_h = 32;
+        // Difficulty Box
+        int row_h = 36;
+        
+        // Base glassmorphic panel for the row
         if (selected) {
-            DrawRect(panel_left - 10, y, panel_width + 10, row_h, {diff_col.r, diff_col.g, diff_col.b, 100});
+            DrawRect(panel_left - 10, y, panel_width + 10, row_h, {255, 255, 255, 40});
+            DrawRectOutline(panel_left - 10, y, panel_width + 10, row_h, {255, 255, 255, 150});
             DrawRect((p == 0) ? (panel_left - 10) : (panel_left + panel_width + 5), y, 5, row_h, diff_col);
-            uint8_t flash = static_cast<uint8_t>(180 + 75 * std::sin(SDL_GetTicks() * 0.01));
-            DrawRect(panel_left - 10, y, panel_width + 10, 1, {255, 255, 255, flash});
-            DrawRect(panel_left - 10, y + row_h - 1, panel_width + 10, 1, {255, 255, 255, flash});
+            
+            // Subtle glow
+            uint8_t flash = static_cast<uint8_t>(100 + 50 * std::sin(SDL_GetTicks() * 0.01));
+            DrawRect(panel_left - 10, y + row_h - 2, panel_width + 10, 2, {diff_col.r, diff_col.g, diff_col.b, flash});
+        } else {
+            DrawRect(panel_left - 10, y, panel_width + 10, row_h, {0, 0, 0, 100});
+            DrawRectOutline(panel_left - 10, y, panel_width + 10, row_h, {100, 100, 120, 50});
+            DrawRect((p == 0) ? (panel_left - 10) : (panel_left + panel_width + 5), y, 5, row_h, {diff_col.r, diff_col.g, diff_col.b, 100});
         }
 
         std::string mode_name = GetChartModeName(chart.chart_type);
         bool is_routine = (chart.chart_type == "dance-routine" || chart.chart_type == "dance-couple");
         
-        std::string label = mode_name;
-        if (!is_routine) {
-            if (chart.variant == ChartVariant::Wild) label += " Wild";
-            else label += " " + chart.difficulty_name;
+        std::string label;
+        if (is_routine) {
+            label = mode_name;
+        } else {
+            if (chart.variant == ChartVariant::Wild) label = "Wild";
+            else label = chart.difficulty_name;
         }
 
-        font_.DrawText(renderer_, (p == 0) ? panel_left : (panel_left + panel_width), y + 6, label, 
+        // Difficulty Name
+        font_.DrawText(renderer_, (p == 0) ? panel_left : (panel_left + panel_width), y + 8, label, 
                        selected ? Color{255, 255, 255, 255} : Color{180, 180, 200, 180}, 
                        FontSize::MEDIUM, align);
         
-        // Grade
-        std::string score_key = song.filepath + "|" + std::to_string(ci);
-        auto it = high_scores_.find(score_key);
-        if (it != high_scores_.end()) {
-            int gx = (p == 0) ? (panel_left + panel_width - 55) : (panel_left + 55);
-            font_.DrawText(renderer_, gx, y + 6, it->second.grade, {255, 255, 200, 255}, FontSize::SMALL, (p == 0) ? TextAlign::RIGHT : TextAlign::LEFT);
-        }
-
+        // Meter
         int meter_x = (p == 0) ? (panel_left + panel_width - 10) : (panel_left + 10);
         TextAlign meter_align = (p == 0) ? TextAlign::RIGHT : TextAlign::LEFT;
 
@@ -3529,7 +3719,34 @@ void GameWindow::RenderChartPanel(int p) {
                            FontSize::LARGE, meter_align);
         }
 
-        y += row_h + 4;
+        // Grade / Clear Badge
+        std::string score_key = song.filepath + "|" + std::to_string(ci);
+        auto it = high_scores_.find(score_key);
+        if (it != high_scores_.end()) {
+            int gx = (p == 0) ? (panel_left + panel_width - 55) : (panel_left + 55);
+            
+            std::string badge_text = it->second.grade;
+            Color badge_col = {150, 150, 150, 255};
+            
+            if (it->second.percentage >= 100.0) {
+                badge_text = "APC";
+                badge_col = {255, 215, 0, 255}; // Gold
+            } else if (it->second.percentage >= 90.0) {
+                // Approximate FC visual for now
+                badge_col = {100, 255, 100, 255}; // Green
+            }
+            
+            // Draw Badge Background
+            int bw = font_.GetTextWidth(badge_text, FontSize::SMALL) + 12;
+            int bx = (p == 0) ? (gx - bw) : gx;
+            int by = y + 8;
+            DrawRect(bx, by, bw, 20, {badge_col.r, badge_col.g, badge_col.b, 50});
+            DrawRectOutline(bx, by, bw, 20, {badge_col.r, badge_col.g, badge_col.b, 200});
+            
+            font_.DrawText(renderer_, bx + bw / 2, by + 2, badge_text, badge_col, FontSize::SMALL, TextAlign::CENTER);
+        }
+
+        y += row_h + 6;
     }
 
     // 2. Groove Radar
@@ -3538,34 +3755,57 @@ void GameWindow::RenderChartPanel(int p) {
     int radar_cy = y + 80;
     int radar_size = 60;
 
-    SDL_SetRenderDrawColor(renderer_, 60, 60, 80, 100);
+    // Radar Background (Dark translucent hexagon/pentagon)
+    SDL_Point bg_points[6];
     for (int i = 0; i < 5; ++i) {
-        double angle1 = (i * 72 - 90) * M_PI / 180.0;
-        double angle2 = ((i + 1) * 72 - 90) * M_PI / 180.0;
-        int x1 = radar_cx + static_cast<int>(radar_size * std::cos(angle1));
-        int y1 = radar_cy + static_cast<int>(radar_size * std::sin(angle1));
-        int x2 = radar_cx + static_cast<int>(radar_size * std::cos(angle2));
-        int y2 = radar_cy + static_cast<int>(radar_size * std::sin(angle2));
-        SDL_RenderDrawLine(renderer_, x1, y1, x2, y2);
-        SDL_RenderDrawLine(renderer_, radar_cx, radar_cy, x1, y1);
+        double angle = (i * 72 - 90) * M_PI / 180.0;
+        bg_points[i].x = radar_cx + static_cast<int>(radar_size * std::cos(angle));
+        bg_points[i].y = radar_cy + static_cast<int>(radar_size * std::sin(angle));
+    }
+    bg_points[5] = bg_points[0];
+
+    // Draw the 5 main axes
+    SDL_SetRenderDrawColor(renderer_, 80, 80, 100, 100);
+    for (int i = 0; i < 5; ++i) {
+        SDL_RenderDrawLine(renderer_, radar_cx, radar_cy, bg_points[i].x, bg_points[i].y);
     }
     
+    // Draw the outer polygon (5 sides)
+    SDL_SetRenderDrawColor(renderer_, 100, 100, 150, 80);
+    SDL_RenderDrawLines(renderer_, bg_points, 6);
+    
+    // Calculate actual radar points
     const auto& selected_c = song.charts[selected_chart_[p]];
     const auto& rv = selected_c.radar;
     double vals[5] = { rv.stream, rv.voltage, rv.air, rv.freeze, rv.chaos };
     SDL_Point points[6];
     
     for (int i=0; i<5; ++i) {
-        double v = vals[i] / 30.0;
-        if (v > 1.1) v = 1.1;
+        double v = vals[i] / 30.0; // Scale down for display (radar is roughly 0-250)
+        if (v > 1.1) v = 1.1; // Cap slightly outside the bounds
         double dist = radar_size * v; 
         double angle = (i * 72 - 90) * M_PI / 180.0;
         points[i].x = radar_cx + static_cast<int>(dist * std::cos(angle));
         points[i].y = radar_cy + static_cast<int>(dist * std::sin(angle));
     }
-    points[5] = points[0];
+    points[5] = points[0]; // Close the loop
     
-    SDL_SetRenderDrawColor(renderer_, 100, 255, 255, 150);
+    // Draw filled radar polygon (simulated with triangles via geometry if available, 
+    // but in raw SDL we lack filled polygons without SDL_gfx. We'll draw thick vibrating lines instead for a glow effect).
+    
+    // Radar Glow Layer
+    SDL_SetRenderDrawColor(renderer_, 50, 200, 255, 60);
+    for (int t = 1; t <= 3; ++t) {
+        SDL_Point glow_points[6];
+        for (int i=0; i<6; ++i) {
+            glow_points[i].x = points[i].x + (std::rand() % 3 - 1);
+            glow_points[i].y = points[i].y + (std::rand() % 3 - 1);
+        }
+        SDL_RenderDrawLines(renderer_, glow_points, 6);
+    }
+
+    // Main Radar Line
+    SDL_SetRenderDrawColor(renderer_, 100, 255, 255, 200);
     SDL_RenderDrawLines(renderer_, points, 6);
 
     const char* labels[5] = {"S", "V", "A", "F", "C"};
@@ -3573,11 +3813,13 @@ void GameWindow::RenderChartPanel(int p) {
         double angle = (i * 72 - 90) * M_PI / 180.0;
         int lx = radar_cx + static_cast<int>((radar_size + 20) * std::cos(angle));
         int ly = radar_cy + static_cast<int>((radar_size + 20) * std::sin(angle));
+        
         font_.DrawText(renderer_, lx, ly-10, labels[i], {200,200,220,255}, FontSize::SMALL, TextAlign::CENTER);
+        
         int val_int = static_cast<int>(vals[i]);
-        if (val_int > 99) val_int = 99;
+        if (val_int > 999) val_int = 999;
         std::string val_str = std::to_string(val_int);
-        font_.DrawText(renderer_, lx, ly+5, val_str, {100,255,200,255}, FontSize::SMALL, TextAlign::CENTER);
+        font_.DrawText(renderer_, lx, ly+5, val_str, {150, 255, 200, 255}, FontSize::SMALL, TextAlign::CENTER);
     }
 }
 
@@ -3587,13 +3829,36 @@ void GameWindow::RenderSongSelectHUD() {
     DrawRect(0, 78, width_, 2, {100, 100, 255, 150}); // Accent line
 
     const auto& songs = scanner_.GetSongs();
-    if (!songs.empty()) {
-        const auto& song = songs[static_cast<size_t>(selected_song_)];
+    if (!songs.empty() && !filtered_songs_.empty() && selected_song_ < static_cast<int>(filtered_songs_.size())) {
+        const auto& song = songs[filtered_songs_[selected_song_]];
         
         // Draw Large Title (Centered)
-        font_.DrawText(renderer_, width_ / 2, 10, song.title, {255, 255, 255, 255}, FontSize::TITLE, TextAlign::CENTER, 1.0, "score");
+        font_.DrawText(renderer_, width_ / 2, 10, song.title, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::CENTER, 1.0, "score");
         // Draw Medium Artist (Centered)
         font_.DrawText(renderer_, width_ / 2, 45, song.artist, {200, 200, 220, 255}, FontSize::MEDIUM, TextAlign::CENTER);
+        
+        // Draw BPM Display (Centered)
+        SimfileParser parser;
+        auto sf = parser.LoadFromFile(song.filepath);
+        if (sf) {
+            if (!sf->bpms.empty()) {
+                double min_bpm = sf->bpms.front().value;
+                double max_bpm = sf->bpms.front().value;
+                for (const auto& kv : sf->bpms) {
+                    if (kv.value < min_bpm) min_bpm = kv.value;
+                    if (kv.value > max_bpm) max_bpm = kv.value;
+                }
+                
+                std::string bpm_str = "BPM: ";
+                if (std::abs(max_bpm - min_bpm) < 1.0) {
+                    bpm_str += std::to_string(static_cast<int>(std::round(min_bpm)));
+                } else {
+                    bpm_str += std::to_string(static_cast<int>(std::round(min_bpm))) + " - " + 
+                               std::to_string(static_cast<int>(std::round(max_bpm)));
+                }
+                font_.DrawText(renderer_, width_ / 2, 65, bpm_str, {150, 255, 100, 255}, FontSize::SMALL, TextAlign::CENTER);
+            }
+        }
     } else {
         font_.DrawText(renderer_, 20, 15, "SELECT MUSIC", {255, 215, 0, 255}, FontSize::LARGE);
     }
@@ -3605,8 +3870,8 @@ void GameWindow::RenderSongSelectHUD() {
 
     // --- Player Info Display (Top Bar Corners) ---
     std::string chart_type_p1 = "";
-    if (!songs.empty()) {
-        const auto& song = songs[static_cast<size_t>(selected_song_)];
+    if (!songs.empty() && !filtered_songs_.empty() && selected_song_ < static_cast<int>(filtered_songs_.size())) {
+        const auto& song = songs[filtered_songs_[selected_song_]];
         int c_idx = selected_chart_[0];
         if (c_idx >= 0 && c_idx < (int)song.charts.size()) {
             chart_type_p1 = song.charts[c_idx].chart_type;
@@ -3625,31 +3890,37 @@ void GameWindow::RenderSongSelectHUD() {
         font_.DrawText(renderer_, px, 8, prof.name, name_col, FontSize::SMALL, align);
         
         // --- NEW: Difficulty Selection for this player ---
-        if (!songs.empty()) {
-            const auto& song = songs[static_cast<size_t>(selected_song_)];
+        if (!songs.empty() && !filtered_songs_.empty() && selected_song_ < static_cast<int>(filtered_songs_.size())) {
+            const auto& song = songs[filtered_songs_[selected_song_]];
             int c_idx = selected_chart_[p];
             if (c_idx >= 0 && c_idx < (int)song.charts.size()) {
                 const auto& chart = song.charts[c_idx];
                 
                 // Diff Name + Meter
                 std::string meter_str = FormatMeter(chart.custom_difficulty);
-                
                 Color d_col = GetDifficultyColor(chart.difficulty_name);
 
-                if (chart.variant == ChartVariant::Wild) {
-                    std::string wild_text = "WILD";
-                    if (!chart.variant_kanji.empty()) wild_text = chart.variant_kanji;
-                    font_.DrawText(renderer_, px, 55, wild_text, d_col, FontSize::MEDIUM, align);
-                    int tw = font_.GetTextWidth(wild_text, FontSize::MEDIUM);
-                    int mx = (align == TextAlign::LEFT) ? px + tw + 10 : px - tw - 10;
-                    font_.DrawText(renderer_, mx, 55 + 4, meter_str, {255, 255, 255, 255}, FontSize::SMALL, align);
-                } else {
-                    std::string full_str = chart.difficulty_name + " " + meter_str;
-                    font_.DrawText(renderer_, px, 55, full_str, d_col, FontSize::MEDIUM, align);
-                }
-                
                 // Chart Type (Single/Double)
-                font_.DrawText(renderer_, px, 35, chart.chart_type, {180, 180, 200, 200}, FontSize::SMALL, align);
+                if (num_active_players_ < 2) {
+                    std::string mode_tex_key = (preferred_mode_ == 0) ? "single" : "double";
+                    SDL_Texture* mode_tex = playtype_textures_.count(mode_tex_key) ? playtype_textures_[mode_tex_key] : nullptr;
+                    
+                    int padding_x = 170; // Increased spacing to the right
+                    int mode_offset = (align == TextAlign::LEFT) ? 80 + padding_x : -80 - padding_x;
+                    int mode_y = 0; // Top of screen, moved up by 15px
+                    if (mode_tex) {
+                        int mw, mh;
+                        SDL_QueryTexture(mode_tex, nullptr, nullptr, &mw, &mh);
+                        float scale = 0.7f;
+                        mw = static_cast<int>(mw * scale);
+                        mh = static_cast<int>(mh * scale);
+                        SDL_Rect dst = { (align == TextAlign::LEFT) ? px + mode_offset : px + mode_offset - mw, mode_y, mw, mh };
+                        SDL_RenderCopy(renderer_, mode_tex, nullptr, &dst);
+                    } else {
+                        std::string fallback_txt = (preferred_mode_ == 0) ? "dance-single" : "dance-double";
+                        font_.DrawText(renderer_, px + mode_offset, mode_y, fallback_txt, {180, 180, 200, 200}, FontSize::SMALL, align);
+                    }
+                }
 
                 // Ready Status
                 if (players_[p].ready) {
@@ -3672,29 +3943,20 @@ void GameWindow::RenderSongSelectHUD() {
                 font_.DrawText(renderer_, px, 32 + 8, label, {150, 200, 200, 200}, FontSize::SMALL, align);
                 
                 int r_off = (align == TextAlign::LEFT) ? 20 : -55;
-                // px + r_off is where the rating number starts
-                // For right align, we need to be careful. RenderRating handles align internally if we pass it, 
-                // but here I'm passing TextAlign::LEFT and manual offsets.
-                // Let's make RenderRating handle the alignment better if needed.
-                // Currently RenderRating(px + r1_off, 32, ...) uses TextAlign::LEFT and cur_x += ...
-                
-                // If align is RIGHT, we should probably pass RIGHT to RenderRating and use px as base.
                 if (align == TextAlign::LEFT) {
                     RenderRating(px + 20, 32, val, TextAlign::LEFT, false);
                 } else {
                     RenderRating(px - 20, 32, val, TextAlign::RIGHT, true);
                 }
             }
-        } else {
-            font_.DrawText(renderer_, px, 32 + 8, "GUEST", {120, 120, 140, 150}, FontSize::SMALL, align);
         }
     }
 
     // 2. Detailed Stats Panel (Bottom Left)
-    if (!songs.empty()) {
+    if (!songs.empty() && !filtered_songs_.empty() && selected_song_ < static_cast<int>(filtered_songs_.size())) {
         int sx = 20;
         int sy = height_ - 180;
-        const auto& song = songs[static_cast<size_t>(selected_song_)];
+        const auto& song = songs[filtered_songs_[selected_song_]];
         std::string score_key = song.filepath + "|" + std::to_string(selected_chart_[0]);
         auto it = high_scores_.find(score_key);
 
@@ -3781,29 +4043,71 @@ void GameWindow::RenderDecide() {
     if (!active_simfile_ || !current_chart_) return;
 
     int center_x = width_ / 2;
-    int jacket_size = 280;
-    int top_y = 100;
+    int center_y = height_ / 2;
+    int jacket_size = 300; // slightly larger for the center screen
 
-    // --- 1. Top Area: Jacket and Song Info Side-by-Side ---
-    SDL_Texture* jacket = GetJacketTexture(active_simfile_->jacket_path);
-    if (!jacket) jacket = GetJacketTexture(active_simfile_->banner_path);
+    // Calculate jacket position (perfectly centered square container)
+    int j_x = center_x - jacket_size / 2;
+    int j_y = center_y - jacket_size / 2;
 
-    int content_w = jacket_size + 40 + 400; // Jacket + spacing + text area
-    int content_x = center_x - content_w / 2;
+    // --- 2. Title & Artist above jacket ---
+    // Moved up and spaced apart
+    int title_y = j_y - 80;
+    int artist_y = j_y - 35;
+    font_.DrawText(renderer_, center_x, title_y, active_simfile_->title, {255, 255, 255, 255}, FontSize::TITLE, TextAlign::CENTER, 1.0, "score");
+    font_.DrawText(renderer_, center_x, artist_y, active_simfile_->artist, {200, 200, 220, 255}, FontSize::MEDIUM, TextAlign::CENTER);
 
-    if (jacket) {
-        SDL_Rect jdst = { content_x, top_y, jacket_size, jacket_size };
-        SDL_RenderCopy(renderer_, jacket, nullptr, &jdst);
-        DrawRectOutline(jdst.x - 2, jdst.y - 2, jdst.w + 4, jdst.h + 4, {255, 255, 255, 200});
+    // --- 1. Centered Jacket ---
+    SDL_Texture* jacket = nullptr;
+    const auto& songs = scanner_.GetSongs();
+    if (!songs.empty() && !filtered_songs_.empty() && selected_song_ < static_cast<int>(filtered_songs_.size())) {
+        const auto& song = songs[filtered_songs_[selected_song_]];
+        jacket = GetJacketTexture(song.jacket_path);
+    }
+    
+    // Fallback if somehow not selected or empty
+    if (!jacket) {
+        std::string full_jacket_path = active_simfile_->directory + "/" + active_simfile_->jacket_path;
+        jacket = GetJacketTexture(full_jacket_path);
+        if (!jacket) {
+            std::string full_banner_path = active_simfile_->directory + "/" + active_simfile_->banner_path;
+            jacket = GetJacketTexture(full_banner_path);
+        }
     }
 
-    int text_x = content_x + jacket_size + 40;
-    font_.DrawText(renderer_, text_x, top_y + 40, active_simfile_->title, {255, 255, 255, 255}, FontSize::TITLE, TextAlign::LEFT, 1.0, "score");
-    font_.DrawText(renderer_, text_x, top_y + 90, active_simfile_->artist, {200, 200, 220, 255}, FontSize::MEDIUM, TextAlign::LEFT);
+    if (jacket) {
+        int jw, jh;
+        SDL_QueryTexture(jacket, nullptr, nullptr, &jw, &jh);
+        double aspect = static_cast<double>(jw) / jh;
+        SDL_Rect jdst;
+        
+        // Fit within the square container
+        if (aspect > 1.0) {
+            int h = static_cast<int>(jacket_size / aspect);
+            jdst = { j_x, j_y + (jacket_size - h) / 2, jacket_size, h };
+        } else {
+            int w = static_cast<int>(jacket_size * aspect);
+            jdst = { j_x + (jacket_size - w) / 2, j_y, w, jacket_size };
+        }
+        
+        // Draw container background
+        DrawRect(j_x, j_y, jacket_size, jacket_size, {20, 20, 40, 200});
+        
+        // Draw Jacket
+        SDL_RenderCopy(renderer_, jacket, nullptr, &jdst);
+        
+        // Draw Outline
+        DrawRectOutline(j_x - 2, j_y - 2, jacket_size + 4, jacket_size + 4, {255, 255, 255, 200});
+    } else {
+        // Empty container
+        DrawRect(j_x, j_y, jacket_size, jacket_size, {20, 20, 40, 200});
+        DrawRectOutline(j_x - 2, j_y - 2, jacket_size + 4, jacket_size + 4, {255, 255, 255, 200});
+        font_.DrawText(renderer_, center_x, center_y, "NO IMAGE", {100, 100, 120, 255}, FontSize::MEDIUM, TextAlign::CENTER);
+    }
 
-    // --- 2. Side Panels: Player Difficulty & Best Scores ---
-    int panel_y = top_y + jacket_size + 60;
-    const auto& songs = scanner_.GetSongs();
+    // --- 3. Side Panels: Player Difficulty & Best Scores ---
+    int panel_y = j_y + jacket_size + 60;
+    // 'songs' is already declared above
 
     for (int p = 0; p < MAX_PLAYERS; ++p) {
         if (!players_[p].joined) continue;
@@ -3815,27 +4119,92 @@ void GameWindow::RenderDecide() {
 
         std::string mode_name = GetChartModeName(chart->chart_type);
         bool is_routine = (chart->chart_type == "dance-routine" || chart->chart_type == "dance-couple");
-        
-        std::string diff_label = mode_name;
-        if (!is_routine) diff_label += " " + chart->difficulty_name;
-        
         Color diff_col = GetDifficultyColor(chart->difficulty_name);
-        font_.DrawText(renderer_, px, panel_y, diff_label, diff_col, FontSize::MEDIUM, align);
-        
         std::string meter_str = FormatMeter(chart->custom_difficulty);
-        font_.DrawText(renderer_, px, panel_y + 35, meter_str, {255, 255, 255, 255}, FontSize::LARGE, align);
 
-        // Best Score
-        std::string score_key = songs[static_cast<size_t>(selected_song_)].filepath + "|" + std::to_string(selected_chart_[p]);
+        if (chart->variant == ChartVariant::Wild) {
+            // Dark rainbow for Wild
+            Color wild_col = Color::Rainbow(SDL_GetTicks() / 1000.0, 0.7f, 0.4f);
+            std::string wild_label = "WILD";
+            std::string kanji_str = chart->variant_kanji.empty() ? "鬼" : chart->variant_kanji;
+
+            int label_tw = font_.GetTextWidth(wild_label, FontSize::MEDIUM);
+            int kanji_tw = font_.GetTextWidth(kanji_str, FontSize::LARGE);
+            int box_w = label_tw + kanji_tw + 20;
+
+            if (p == 0) {
+                font_.DrawText(renderer_, px, panel_y, wild_label, wild_col, FontSize::MEDIUM, TextAlign::LEFT);
+                font_.DrawText(renderer_, px + label_tw + 10, panel_y - 4, kanji_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::LEFT);
+            } else {
+                font_.DrawText(renderer_, px, panel_y, wild_label, wild_col, FontSize::MEDIUM, TextAlign::RIGHT);
+                font_.DrawText(renderer_, px - label_tw - 10, panel_y - 4, kanji_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::RIGHT);
+            }
+        } else {
+            std::string diff_label;
+            if (is_routine) diff_label = mode_name;
+            else diff_label = chart->difficulty_name;
+            std::transform(diff_label.begin(), diff_label.end(), diff_label.begin(), ::toupper);
+
+            int label_tw = font_.GetTextWidth(diff_label, FontSize::MEDIUM);
+            int meter_tw = font_.GetTextWidth(meter_str, FontSize::LARGE);
+            int box_w = label_tw + meter_tw + 20;
+
+            if (p == 0) {
+                font_.DrawText(renderer_, px, panel_y, diff_label, diff_col, FontSize::MEDIUM, TextAlign::LEFT);
+                font_.DrawText(renderer_, px + label_tw + 10, panel_y - 4, meter_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::LEFT);
+            } else {
+                font_.DrawText(renderer_, px, panel_y, diff_label, diff_col, FontSize::MEDIUM, TextAlign::RIGHT);
+                font_.DrawText(renderer_, px - label_tw - 10, panel_y - 4, meter_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::RIGHT);
+            }
+        }
+
+        // Chart Artist & Best Score at Bottom Corners
+        int bottom_x = (p == 0) ? 50 : width_ - 50;
+        int bottom_y = height_ - 80;
+        
+        // 1. Chart Artist (Filtered)
+        std::string author = chart->credit;
+        if (author.empty()) author = "Unknown";
+        
+        // Filter out obvious difficulty-related junk that some simfiles put in the credit field
+        std::string author_lower = author;
+        for (auto& c : author_lower) c = static_cast<char>(std::tolower(c));
+        
+        std::string kanji_str = chart->variant_kanji.empty() ? "鬼" : chart->variant_kanji;
+        
+        if (author_lower == "beginner" || author_lower == "easy" || author_lower == "medium" || 
+            author_lower == "hard" || author_lower == "challenge" || author_lower == "edit" || 
+            author_lower == "blank" || author_lower == "none" || author_lower == "n/a" ||
+            author == kanji_str) {
+            author = "Unknown";
+        }
+        
+        font_.DrawText(renderer_, bottom_x, bottom_y - 25, "CHART: " + author, {200, 200, 220, 255}, FontSize::SMALL, align);
+
+        // 2. Best Score
+        std::string score_key = songs[filtered_songs_[selected_song_]].filepath + "|" + std::to_string(selected_chart_[p]);
         auto it = high_scores_.find(score_key);
         if (it != high_scores_.end()) {
             char sbuf[64];
             std::snprintf(sbuf, sizeof(sbuf), "BEST: %.2f%% (%s)", it->second.percentage, it->second.grade.c_str());
-            font_.DrawText(renderer_, px, panel_y + 80, sbuf, {220, 255, 220, 200}, FontSize::SMALL, align);
+            
+            // Add Clear Type Badge if applicable
+            std::string clear_type_str = "";
+            Color clear_col = {255, 255, 255, 255};
+            if (it->second.percentage >= 100.0) {
+                 clear_type_str = " [APC]";
+                 clear_col = {255, 215, 0, 255}; // Gold
+            } else if (it->second.grade != "F") { // Simplified logic for demonstration; ideally we track FC per score
+                 // We don't have FC stored in high_score struct natively here unless added. We'll stick to Grade for now.
+            }
+
+            font_.DrawText(renderer_, bottom_x, bottom_y, std::string(sbuf) + clear_type_str, {220, 255, 220, 255}, FontSize::SMALL, align);
+        } else {
+            font_.DrawText(renderer_, bottom_x, bottom_y, "BEST: ---", {100, 100, 100, 255}, FontSize::SMALL, align);
         }
     }
 
-    // Prompt?
+    // Prompt
     font_.DrawText(renderer_, center_x, height_ - 50, "PREPARING...", {255, 255, 255, 128}, FontSize::SMALL, TextAlign::CENTER);
 }
 
@@ -3904,6 +4273,69 @@ void GameWindow::RenderGameplay() {
         
         RenderReceptors(frame_cfg, mods);
         RenderHoldIndicators(p, frame_cfg, mods);
+
+        // --- Clear Type Animation Rendering (Per-Player) ---
+        if (ps.clear_animation_timer > 0.0 && ps.clear_type >= ClearType::FULL_COMBO) {
+            double t = 3.0 - ps.clear_animation_timer;
+            uint8_t alpha = 255;
+            if (ps.clear_animation_timer < 0.5) alpha = static_cast<uint8_t>((ps.clear_animation_timer / 0.5) * 255);
+
+            double pop = (t < 0.3) ? (std::pow(1.0 - (t / 0.3), 3.0) * 0.5) : 0.0;
+            double scale = 1.2 + pop;
+
+            Color col = GetClearTypeColor(ps.clear_type);
+            
+            if (ps.clear_type == ClearType::ALL_PERFECT_EXTRAORDINARY) {
+                double time = SDL_GetTicks() / 1000.0;
+                double h = std::fmod(time * 200.0, 360.0);
+                auto r = static_cast<uint8_t>(127 + 127 * std::cos(h * M_PI / 180.0));
+                auto g = static_cast<uint8_t>(127 + 127 * std::cos((h + 120.0) * M_PI / 180.0));
+                auto b = static_cast<uint8_t>(127 + 127 * std::cos((h + 240.0) * M_PI / 180.0));
+                col = {r, g, b, alpha};
+            } else if (ps.clear_type == ClearType::ALL_PERFECT_CRITICAL) {
+                double pulse = 0.8 + 0.2 * std::sin(SDL_GetTicks() / 100.0);
+                col = {static_cast<uint8_t>(200 * pulse), static_cast<uint8_t>(220 * pulse), static_cast<uint8_t>(255 * pulse), alpha};
+            } else if (ps.clear_type == ClearType::ALL_PERFECT_PLUS) {
+                double pulse = 0.9 + 0.1 * std::sin(SDL_GetTicks() / 80.0);
+                col = {static_cast<uint8_t>(255 * pulse), static_cast<uint8_t>(215 * pulse), 0, alpha};
+            }
+
+            int center_x = (GetFieldLeft() + GetFieldRight()) / 2;
+
+            if (t < 0.5) {
+                double flash_t = t / 0.5; // 0.0 to 1.0
+                int fw = GetFieldRight() - GetFieldLeft() + 100;
+                int fh = height_;
+                int rect_w = static_cast<int>(fw * (1.0 - flash_t));
+                int rect_h = static_cast<int>(fh * std::pow(1.0 - flash_t, 2.0));
+                
+                int rect_x = center_x - rect_w / 2;
+                int rect_y = height_ / 2 - rect_h / 2;
+                
+                uint8_t flash_alpha = static_cast<uint8_t>(180 * (1.0 - flash_t));
+                SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(renderer_, col.r, col.g, col.b, flash_alpha);
+                SDL_Rect flash_rect = {rect_x, rect_y, rect_w, rect_h};
+                SDL_RenderFillRect(renderer_, &flash_rect);
+            }
+
+            std::string main_text = ClearTypeName(ps.clear_type);
+            std::string sub_text = "";
+
+            if (ps.clear_type == ClearType::ALL_PERFECT_EXTRAORDINARY) {
+                main_text = "ALL PERFECT";
+                sub_text = "EXTRAORDINARY";
+            } else if (ps.clear_type == ClearType::ALL_PERFECT_CRITICAL) {
+                main_text = "ALL PERFECT";
+                sub_text = "CRITICAL";
+            }
+
+            font_.DrawText(renderer_, center_x, height_ / 2 - 80, main_text, col, FontSize::TITLE, TextAlign::CENTER, scale, "score");
+            
+            if (!sub_text.empty()) {
+                font_.DrawText(renderer_, center_x, height_ / 2 - 20, sub_text, {255, 255, 255, alpha}, FontSize::MEDIUM, TextAlign::CENTER, 1.0);
+            }
+        }
 
         // Refined Dimming overlay for failed players (Animated Gradient)
         if (ps.failed_sequence) {
@@ -3979,45 +4411,7 @@ void GameWindow::RenderGameplay() {
         }
     }
 
-    // --- Clear Type Animation Rendering ---
-    if (clear_animation_timer_ > 0.0 && clear_type_ >= ClearType::FULL_COMBO) {
-        double t = 3.0 - clear_animation_timer_;
-        uint8_t alpha = 255;
-        if (clear_animation_timer_ < 0.5) alpha = static_cast<uint8_t>((clear_animation_timer_ / 0.5) * 255);
 
-        double pop = (t < 0.3) ? (std::pow(1.0 - (t / 0.3), 3.0) * 0.5) : 0.0;
-        double scale = 1.2 + pop;
-
-        Color col = GetClearTypeColor(clear_type_);
-        std::string text = ClearTypeName(clear_type_);
-
-        // Add extra flair for Max Score tiers
-        if (clear_type_ == ClearType::ALL_PERFECT_EXTRAORDINARY) {
-            // Rainbow Cycle
-            double time = SDL_GetTicks() / 1000.0;
-            double h = std::fmod(time * 200.0, 360.0);
-            // Simple HSV to RGB approximation
-            auto r = static_cast<uint8_t>(127 + 127 * std::cos(h * M_PI / 180.0));
-            auto g = static_cast<uint8_t>(127 + 127 * std::cos((h + 120.0) * M_PI / 180.0));
-            auto b = static_cast<uint8_t>(127 + 127 * std::cos((h + 240.0) * M_PI / 180.0));
-            col = {r, g, b, alpha};
-        } else if (clear_type_ == ClearType::ALL_PERFECT_CRITICAL) {
-            // Silver/Crystalline theme: Pulsating light blue/silver
-            double pulse = 0.8 + 0.2 * std::sin(SDL_GetTicks() / 100.0);
-            col = {static_cast<uint8_t>(200 * pulse), static_cast<uint8_t>(220 * pulse), static_cast<uint8_t>(255 * pulse), alpha};
-        } else if (clear_type_ == ClearType::ALL_PERFECT_PLUS) {
-            // Golden-Yellow theme with extra brightness
-            double pulse = 0.9 + 0.1 * std::sin(SDL_GetTicks() / 80.0);
-            col = {static_cast<uint8_t>(255 * pulse), static_cast<uint8_t>(215 * pulse), 0, alpha};
-        }
-
-        font_.DrawText(renderer_, width_ / 2, height_ / 2 - 80, text, col, FontSize::TITLE, TextAlign::CENTER, scale, "score");
-        
-        // Add a "CLEARED!!" subtitle for MFCs
-        if (clear_type_ >= ClearType::ALL_PERFECT) {
-            font_.DrawText(renderer_, width_ / 2, height_ / 2 - 20, "CLEARED!!", {255, 255, 255, alpha}, FontSize::MEDIUM, TextAlign::CENTER, 1.0);
-        }
-    }
 
     if (failed_sequence_) RenderFailOverlay();
     
@@ -4790,8 +5184,9 @@ void GameWindow::RenderJudgement() {
         std::string err_text = last_err < 0 ? "FAST" : "SLOW";
         Color err_col = last_err < 0 ? Color{100, 200, 255, static_cast<uint8_t>(255 * alpha_mult)}
                                              : Color{255, 120, 80, static_cast<uint8_t>(255 * alpha_mult)};
+        Color err_outline = {0, 0, 0, static_cast<uint8_t>(200 * alpha_mult)};
         
-        font_.DrawText(renderer_, field_center_x + 90, judge_y - 35, err_text, err_col, FontSize::MEDIUM, TextAlign::LEFT);
+        font_.DrawTextOutline(renderer_, field_center_x + 90, judge_y - 55, err_text, err_col, err_outline, FontSize::MEDIUM, TextAlign::LEFT, 1.0, "default", 3);
     }
 
     // Numeric offset 窶・only when debug overlays are active
@@ -4856,10 +5251,21 @@ void GameWindow::RenderJudgement() {
             }
         } else if (pstate.combo_display_mode == ComboDisplayMode::AdditiveScore ||
                    pstate.combo_display_mode == ComboDisplayMode::SubtractiveScore) {
-            // Score +/- : color by current accuracy grade
+            // Score +/- : color by the displayed value (potential for Subtractive, running for Additive)
+            double total_n = static_cast<double>(pstate.total_hittable_notes);
             double acc = 0.0;
-            if (pstate.total_hittable_notes > 0)
-                acc = pstate.normal_score / static_cast<double>(pstate.total_hittable_notes);
+            if (total_n > 0) {
+                if (pstate.combo_display_mode == ComboDisplayMode::SubtractiveScore) {
+                    // Use the max-potential value (same formula as GetComboDisplayText)
+                    double max_w = 101.0;
+                    double max_possible = total_n * max_w;
+                    int judged = pstate.total_hits + pstate.total_miss;
+                    double points_lost = (judged * max_w) - pstate.normal_score;
+                    acc = (max_possible - points_lost) / total_n;
+                } else {
+                    acc = pstate.normal_score / total_n;
+                }
+            }
             if (acc >= 100.75)      text_col = {180, 240, 255, 255}; // SSS+ (ice)
             else if (acc >= 100.0)  text_col = {255, 255, 255, 255}; // SS+ (white)
             else if (acc >= 97.5)   text_col = {255, 230, 50, 255};  // S   (gold)
@@ -4893,16 +5299,30 @@ void GameWindow::RenderJudgement() {
         int combo_x = field_center_x;
         int combo_y = judge_y - 115;
 
+        // Darker outline color derived from text_col
+        Color outline_col = {
+            static_cast<uint8_t>(text_col.r / 2),
+            static_cast<uint8_t>(text_col.g / 2),
+            static_cast<uint8_t>(text_col.b / 2),
+            text_col.a
+        };
+
         // Styled display for scores/diffs
         if (is_score || is_diff) 
         {
-            font_.DrawStyledNumber(renderer_, combo_x, combo_y, custom_text, text_col, TextAlign::CENTER, bounce, true, {0,0,0,text_col.a});
+            font_.DrawStyledNumber(renderer_, combo_x, combo_y, custom_text, text_col, TextAlign::CENTER, bounce, true, outline_col, FontSize::HUGE, FontSize::MEDIUM, 3);
         } else {
-            font_.DrawMonoText(renderer_, combo_x, combo_y, custom_text.c_str(), text_col, FontSize::HUGE, TextAlign::CENTER, bounce, "score", -1, true);
+            font_.DrawMonoText(renderer_, combo_x, combo_y, custom_text.c_str(), text_col, FontSize::HUGE, TextAlign::CENTER, bounce, "score", -1, true, outline_col, 0, 3);
         }
 
         if (is_combo) {
-            font_.DrawText(renderer_, combo_x, combo_y + 50, "COMBO", {220, 220, 240, text_col.a}, FontSize::SMALL, TextAlign::CENTER);
+            Color label_col = {220, 220, 240, text_col.a};
+            if (pstate.clear_type >= ClearType::FULL_COMBO) {
+                label_col.r = text_col.r;
+                label_col.g = text_col.g;
+                label_col.b = text_col.b;
+            }
+            font_.DrawText(renderer_, combo_x, combo_y + 50, "COMBO", label_col, FontSize::SMALL, TextAlign::CENTER);
         } else {
             // Label for what we are showing
             const char* label = "";
@@ -5421,7 +5841,7 @@ void GameWindow::RenderPlayerTopHUD(int p) {
         anchor_x = GetFieldRight() + 10;
     }
 
-    int icon_y = 55;
+    int icon_y = 35; // Moved up by 20px
     int acc_y = 85;
     
     // Mod tags
@@ -5440,24 +5860,126 @@ void GameWindow::RenderPlayerTopHUD(int p) {
     Color diff_col = GetDifficultyColor(ps.current_chart->difficulty_name);
     
     int meter_y = icon_y - 25;
-    if (ps.current_chart->variant == ChartVariant::Wild) {
-        std::string wild_text = "WILD";
-        if (!ps.current_chart->variant_kanji.empty()) wild_text = ps.current_chart->variant_kanji;
-        font_.DrawText(renderer_, anchor_x, meter_y, wild_text, diff_col, FontSize::MEDIUM, align);
-        int tw = font_.GetTextWidth(wild_text, FontSize::MEDIUM);
-        int mx = (p == 0) ? anchor_x + tw + 10 : anchor_x - tw - 10;
-        font_.DrawText(renderer_, mx, meter_y + 4, meter_str, {255, 255, 255, 255}, FontSize::SMALL, align);
-    } else {
-        // Draw Mode + Difficulty Name + Meter
-        std::string mode_name = GetChartModeName(ps.current_chart->chart_type);
-        bool is_routine = (ps.current_chart->chart_type == "dance-routine" || ps.current_chart->chart_type == "dance-couple");
-        
-        std::string full_diff;
-        if (is_routine) full_diff = mode_name + " " + meter_str;
-        else if (ps.current_chart->chart_type == "dance-double") full_diff = "DOUBLE " + diff_name + " " + meter_str;
-        else full_diff = diff_name + " " + meter_str;
 
-        font_.DrawText(renderer_, anchor_x, meter_y, full_diff, diff_col, FontSize::MEDIUM, align);
+    // Helper to map SM diff names to our texture names
+    std::string diff_tex_key;
+    if (ps.current_chart->variant == ChartVariant::Wild) diff_tex_key = "wild";
+    else {
+        std::string lower_diff = ps.current_chart->difficulty_name;
+        std::transform(lower_diff.begin(), lower_diff.end(), lower_diff.begin(), ::tolower);
+        if (lower_diff == "beginner") diff_tex_key = "beginner";
+        else if (lower_diff == "easy") diff_tex_key = "basic";
+        else if (lower_diff == "medium") diff_tex_key = "advanced";
+        else if (lower_diff == "hard") diff_tex_key = "expert";
+        else if (lower_diff == "challenge") diff_tex_key = "challenge";
+    }
+
+    std::string mode_tex_key;
+    if (ps.current_chart->chart_type == "dance-single") mode_tex_key = "single";
+    else if (ps.current_chart->chart_type == "dance-double") mode_tex_key = "double";
+
+    SDL_Texture* diff_tex = diff_textures_.count(diff_tex_key) ? diff_textures_[diff_tex_key] : nullptr;
+    SDL_Texture* mode_tex = playtype_textures_.count(mode_tex_key) ? playtype_textures_[mode_tex_key] : nullptr;
+
+    int meter_tw = font_.GetTextWidth(meter_str, FontSize::LARGE);
+    
+    // Default fallback text size
+    std::string mode_name = GetChartModeName(ps.current_chart->chart_type);
+    bool is_routine = (ps.current_chart->chart_type == "dance-routine" || ps.current_chart->chart_type == "dance-couple");
+    std::string diff_label;
+    if (ps.current_chart->variant == ChartVariant::Wild) diff_label = "WILD";
+    else if (is_routine) diff_label = mode_name;
+    else diff_label = diff_name;
+
+    int fallback_tw = font_.GetTextWidth(diff_label, FontSize::MEDIUM);
+    if (ps.current_chart->variant == ChartVariant::Wild) {
+        meter_tw = font_.GetTextWidth(ps.current_chart->variant_kanji.empty() ? "鬼" : ps.current_chart->variant_kanji, FontSize::LARGE);
+    }
+    
+    // We compute total width of block
+    int diff_w = 0, diff_h = 16;
+    if (diff_tex) {
+        // Query original texture size
+        int raw_w, raw_h;
+        SDL_QueryTexture(diff_tex, nullptr, nullptr, &raw_w, &raw_h);
+        
+        // Scale it down by 50%
+        float scale = 0.5f;
+        diff_w = static_cast<int>(raw_w * scale);
+        diff_h = static_cast<int>(raw_h * scale);
+    }
+    
+    int content_w = 0;
+    if (diff_tex) {
+        content_w = diff_w;
+    } else {
+        content_w = fallback_tw;
+    }
+    
+    int box_w = content_w + meter_tw + 20;
+    int box_h = 28;
+    int box_x = (p == 0) ? anchor_x - 4 : anchor_x - box_w + 4;
+    
+    if (ps.current_chart->variant == ChartVariant::Wild) {
+        Color wild_col = Color::Rainbow(SDL_GetTicks() / 1000.0, 0.7f, 0.4f);
+        diff_col = wild_col; // Colorize meter or text if needed
+    }
+
+    if (diff_tex) {
+        SDL_Rect d_dst = { 0, 0, diff_w, diff_h };
+        
+        if (p == 0) {
+            d_dst.x = anchor_x;
+            d_dst.y = meter_y + (box_h - diff_h)/2 - 3;
+            
+            SDL_SetTextureColorMod(diff_tex, diff_col.r, diff_col.g, diff_col.b);
+            SDL_RenderCopy(renderer_, diff_tex, nullptr, &d_dst);
+            SDL_SetTextureColorMod(diff_tex, 255, 255, 255);
+            
+            if (ps.current_chart->variant == ChartVariant::Wild) {
+                std::string kanji_str = ps.current_chart->variant_kanji.empty() ? "鬼" : ps.current_chart->variant_kanji;
+                font_.DrawText(renderer_, d_dst.x + diff_w + 10, meter_y - 4, kanji_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::LEFT);
+            } else {
+                font_.DrawText(renderer_, d_dst.x + diff_w + 10, meter_y - 4, meter_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::LEFT);
+            }
+        } else {
+            // Right align
+            d_dst.x = anchor_x - diff_w;
+            d_dst.y = meter_y + (box_h - diff_h)/2 - 3;
+            SDL_SetTextureColorMod(diff_tex, diff_col.r, diff_col.g, diff_col.b);
+            SDL_RenderCopy(renderer_, diff_tex, nullptr, &d_dst);
+            SDL_SetTextureColorMod(diff_tex, 255, 255, 255);
+            
+            int text_x = d_dst.x - 10;
+            
+            if (ps.current_chart->variant == ChartVariant::Wild) {
+                std::string kanji_str = ps.current_chart->variant_kanji.empty() ? "鬼" : ps.current_chart->variant_kanji;
+                font_.DrawText(renderer_, text_x, meter_y - 4, kanji_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::RIGHT);
+            } else {
+                font_.DrawText(renderer_, text_x, meter_y - 4, meter_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::RIGHT);
+            }
+        }
+    } else {
+        // Fallback
+        if (p == 0) {
+            Color lbl_col = (ps.current_chart->variant == ChartVariant::Wild) ? diff_col /* wild */ : diff_col;
+            font_.DrawText(renderer_, anchor_x, meter_y, diff_label, lbl_col, FontSize::MEDIUM, TextAlign::LEFT);
+            if (ps.current_chart->variant == ChartVariant::Wild) {
+                std::string kanji_str = ps.current_chart->variant_kanji.empty() ? "鬼" : ps.current_chart->variant_kanji;
+                font_.DrawText(renderer_, anchor_x + fallback_tw + 10, meter_y - 4, kanji_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::LEFT);
+            } else {
+                font_.DrawText(renderer_, anchor_x + fallback_tw + 10, meter_y - 4, meter_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::LEFT);
+            }
+        } else {
+            Color lbl_col = (ps.current_chart->variant == ChartVariant::Wild) ? diff_col /* wild */ : diff_col;
+            font_.DrawText(renderer_, anchor_x, meter_y, diff_label, lbl_col, FontSize::MEDIUM, TextAlign::RIGHT);
+            if (ps.current_chart->variant == ChartVariant::Wild) {
+                std::string kanji_str = ps.current_chart->variant_kanji.empty() ? "鬼" : ps.current_chart->variant_kanji;
+                font_.DrawText(renderer_, anchor_x - fallback_tw - 10, meter_y - 4, kanji_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::RIGHT);
+            } else {
+                font_.DrawText(renderer_, anchor_x - fallback_tw - 10, meter_y - 4, meter_str, {255, 255, 255, 255}, FontSize::LARGE, TextAlign::RIGHT);
+            }
+        }
     }
 
     int cur_x = anchor_x;
@@ -5468,9 +5990,10 @@ void GameWindow::RenderPlayerTopHUD(int p) {
         int bw = tw + 12;
         int bx = (p == 0) ? cur_x : cur_x - bw;
         
-        DrawRect(bx, icon_y, bw, 22, {40, 40, 60, 180});
-        DrawRectOutline(bx, icon_y, bw, 22, {80, 80, 120, 200});
-        font_.DrawText(renderer_, bx + 6, icon_y + 3, mods[i], {220, 230, 255, 255}, FontSize::SMALL);
+        int mod_y = icon_y + 20; // Restoring original position of 55
+        DrawRect(bx, mod_y, bw, 22, {40, 40, 60, 180});
+        DrawRectOutline(bx, mod_y, bw, 22, {80, 80, 120, 200});
+        font_.DrawText(renderer_, bx + 6, mod_y + 3, mods[i], {220, 230, 255, 255}, FontSize::SMALL);
         
         if (p == 0) cur_x += bw + icon_spacing;
         else cur_x -= (bw + icon_spacing);
@@ -5555,7 +6078,7 @@ void GameWindow::RenderPlayerLifeBar(int p) {
     DrawRect(bar_x - 3, bar_y - 3, bar_w + 6, 2, {60, 60, 100, 255});
     DrawRect(bar_x - 3, bar_y + bar_h + 1, bar_w + 6, 2, {60, 60, 100, 255});
 
-    float life = ps.life_meter.GetLife();
+    float life = ps.displayed_life; // Use animated value, not raw life
     LifeType type = ps.life_meter.GetType();
 
     if (type == LifeType::STANDARD) {
@@ -6310,9 +6833,7 @@ int GameWindow::GetFieldLeft() const {
     int lane_w = GetLaneWidth();
     int total_w = num_cols * lane_w + (num_cols - 1) * scaled_padding;
     
-    if (chart && chart->chart_type == "dance-couple" && num_cols == 8) {
-        total_w += static_cast<int>(60 * scale);
-    }
+
     
     return (width_ - total_w) / 2 + render_x_offset_;
 }
@@ -6326,9 +6847,7 @@ int GameWindow::GetFieldRight() const {
     int lane_w = GetLaneWidth();
     int field_left = GetFieldLeft();
     int total_w = num_cols * lane_w + (num_cols - 1) * scaled_padding;
-    if (chart && chart->chart_type == "dance-couple" && num_cols == 8) {
-        total_w += static_cast<int>(60 * scale);
-    }
+
     return field_left + total_w;
 }
 
@@ -6613,8 +7132,14 @@ void GameWindow::RenderRating(int x, int y, double rating, TextAlign align, bool
 
 
 std::string GameWindow::FormatMeter(double d) {
+    int whole = static_cast<int>(d);
+    double frac = d - whole;
     char buf[16];
-    std::snprintf(buf, sizeof(buf), "%.1f", d);
+    if (frac > 0.5) {
+        std::snprintf(buf, sizeof(buf), "%d+", whole);
+    } else {
+        std::snprintf(buf, sizeof(buf), "%d", whole);
+    }
     return std::string(buf);
 }
 

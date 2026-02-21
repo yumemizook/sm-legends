@@ -50,8 +50,21 @@ int SongScanner::ScanDirectory(const std::string& root_path) {
         entry.offset    = simfile->offset;
         entry.num_charts = static_cast<int>(simfile->charts.size());
 
+        // Sort charts by difficulty meter so they display from easiest to hardest
+        std::sort(simfile->charts.begin(), simfile->charts.end(), [](const auto& a, const auto& b) {
+            return a.difficulty_meter < b.difficulty_meter;
+        });
+
         // Extract chart summaries
         for (const auto& chart : simfile->charts) {
+            // Only include specific 4-panel and 8-panel dance charts
+            if (chart.chart_type != "dance-single" &&
+                chart.chart_type != "dance-double" &&
+                chart.chart_type != "dance-couple" &&
+                chart.chart_type != "dance-routine") {
+                continue;
+            }
+
             SongEntry::ChartInfo info;
             info.chart_type       = chart.chart_type;
             info.difficulty_name  = chart.difficulty_name;
@@ -64,6 +77,9 @@ int SongScanner::ScanDirectory(const std::string& root_path) {
             info.num_notes = chart.GetTotalTaps();
             entry.charts.push_back(std::move(info));
         }
+
+        // If song has no valid dance charts, completely ignore it
+        if (entry.charts.empty()) continue;
 
         // Store the parsed simfile for immediate use
         entry.simfile = std::move(simfile);
