@@ -1,6 +1,6 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
-<!-- Created by GNU Texinfo 7.2, https://www.gnu.org/software/texinfo/ -->
+<!-- Created by , GNU Texinfo 7.1.1 -->
   <head>
     <meta charset="utf-8">
     <title>
@@ -19,7 +19,7 @@
 
 <a name="SEC_Top"></a>
 
-<div class="region-contents" id="SEC_Contents">
+<div class="element-contents" id="SEC_Contents">
 <h2 class="contents-heading">Table of Contents</h2>
 
 <div class="contents">
@@ -83,12 +83,13 @@
     <li><a id="toc-tee" href="#tee">3.40 tee</a></li>
     <li><a id="toc-tcp" href="#tcp">3.41 tcp</a></li>
     <li><a id="toc-tls" href="#tls">3.42 tls</a></li>
-    <li><a id="toc-udp" href="#udp">3.43 udp</a>
+    <li><a id="toc-dtls" href="#dtls">3.43 dtls</a></li>
+    <li><a id="toc-udp" href="#udp">3.44 udp</a>
     <ul class="toc-numbered-mark">
-      <li><a id="toc-Examples-1" href="#Examples-1">3.43.1 Examples</a></li>
+      <li><a id="toc-Examples-1" href="#Examples-1">3.44.1 Examples</a></li>
     </ul></li>
-    <li><a id="toc-unix" href="#unix">3.44 unix</a></li>
-    <li><a id="toc-zmq" href="#zmq">3.45 zmq</a></li>
+    <li><a id="toc-unix" href="#unix">3.45 unix</a></li>
+    <li><a id="toc-zmq" href="#zmq">3.46 zmq</a></li>
   </ul></li>
   <li><a id="toc-See-Also" href="#See-Also">4 See Also</a></li>
   <li><a id="toc-Authors" href="#Authors">5 Authors</a></li>
@@ -351,7 +352,7 @@ a unique resource.
 <p>where <var class="var">URL</var> is the url containing a line break delimited list of
 resources to be concatenated, each one possibly specifying a distinct
 protocol. Special characters must be escaped with backslash or single
-quotes. See <a data-manual="ffmpeg-utils" href="./ffmpeg-utils.html#quoting_005fand_005fescaping">the &quot;Quoting and escaping&quot;
+quotes. See <a data-manual="ffmpeg-utils" href="ffmpeg-utils.html#quoting_005fand_005fescaping">the &quot;Quoting and escaping&quot;
 section in the ffmpeg-utils(1) manual</a>.
 </p>
 <p>For example to read a sequence of files <samp class="file">split1.mpeg</samp>,
@@ -483,6 +484,18 @@ means auto (seekable for normal files, non-seekable for named pipes).
 <p>Many demuxers handle seekable and non-seekable resources differently,
 overriding this might speed up opening certain files at the cost of losing some
 features (e.g. accurate seeking).
+</p>
+</dd>
+<dt><samp class="option">pkt_size</samp></dt>
+<dd><p>Set the maximum packet size used for file I/O. A smaller value may reduce
+memory usage. A higher value may increase throughput especially with networked
+filesystems.
+</p>
+<p>For reading, if explicitly set, it overrides the default internal buffer size
+(32 KB) and limits the maximum amount of data read per operation.
+</p>
+<p>For writing, this sets the size of each write operation. The default is 256 KB
+for regular files, 32 KB otherwise.
 </p></dd>
 </dl>
 
@@ -610,6 +623,20 @@ string describing the libavformat build. (&quot;Lavf/&lt;version&gt;&quot;)
 </dd>
 <dt><samp class="option">multiple_requests</samp></dt>
 <dd><p>Use persistent connections if set to 1, default is 0.
+</p>
+</dd>
+<dt><samp class="option">initial_request_size</samp></dt>
+<dd><p>Limit the size of initial requests. This is useful when dealing with formats
+that require frequent seeks during initial parsing. This lasts until the
+demuxer makes a read request larger than this size (without a seek in between),
+after which the implementation will continue using unbounded requests as usual.
+Disabled (set to 0) by default.
+</p>
+<p>Note that if enabling this option, it&rsquo;s strongly recommended to also enable
+the <samp class="option">multiple_requests</samp> option, as well as setting
+<samp class="option">short_seek_size</samp> to the same value or higher. Doing so allows FFmpeg
+to reuse a single HTTP connection wherever possible, even for formats like
+MXF or MOV that require frequent small seeks during initial parsing.
 </p>
 </dd>
 <dt><samp class="option">post_data</samp></dt>
@@ -1219,6 +1246,12 @@ is set to live.
 <p><em class="emph">Remark: Writing to the socket is currently not optimized to minimize system calls and reduces the efficiency / effect of TCP_NODELAY.</em>
 </p>
 </dd>
+<dt><samp class="option">tcp_keepalive=<var class="var">1|0</var></samp></dt>
+<dd><p>Enable the TCP keepalive mechanism to detect dead peers and help maintain long-lived idle connections. Default value is 0.
+</p>
+<p>Only the basic keepalive option (SO_KEEPALIVE) can be enabled or disabled. Platform-specific tuning parameters such as TCP_KEEPIDLE, TCP_KEEPINTVL, or TCP_KEEPCNT are not configurable and will use the operating system&rsquo;s default values.
+</p>
+</dd>
 </dl>
 
 <p>For example to read with <code class="command">ffplay</code> a multimedia resource named
@@ -1405,9 +1438,13 @@ meaning as specified for the RTMP native protocol.
 <p><var class="var">port</var> specifies the RTP port to use.
 </p>
 <p><var class="var">options</var> contains a list of &amp;-separated options of the form
-<var class="var">key</var>=<var class="var">val</var>.
+<var class="var">key</var>=<var class="var">val</var>. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
 </p>
-<p>The following URL options are supported:
+<p>Options can also can be specified via command line options (or in code via
+<code class="code">AVOption</code>s).
+</p>
+<p>The list of supported options follows.
 </p>
 <dl class="table">
 <dt><samp class="option">ttl=<var class="var">n</var></samp></dt>
@@ -1418,11 +1455,13 @@ meaning as specified for the RTMP native protocol.
 <dd><p>Set the remote RTCP port to <var class="var">n</var>.
 </p>
 </dd>
-<dt><samp class="option">localrtpport=<var class="var">n</var></samp></dt>
+<dt><samp class="option">localport, local_rtpport, localrtpport=<var class="var">n</var></samp></dt>
 <dd><p>Set the local RTP port to <var class="var">n</var>.
 </p>
+<p>Using the localport option name is deprecated and should not be used.
+</p>
 </dd>
-<dt><samp class="option">localrtcpport=<var class="var">n</var>'</samp></dt>
+<dt><samp class="option">local_rtcpport, localrtcpport=<var class="var">n</var>'</samp></dt>
 <dd><p>Set the local RTCP port to <var class="var">n</var>.
 </p>
 </dd>
@@ -1450,13 +1489,6 @@ to 0).
 <dt><samp class="option">write_to_source=0|1</samp></dt>
 <dd><p>Send packets to the source address of the latest received packet (if
 set to 1) or to a default remote address (if set to 0).
-</p>
-</dd>
-<dt><samp class="option">localport=<var class="var">n</var></samp></dt>
-<dd><p>Set the local RTP port to <var class="var">n</var>.
-</p>
-<p>This is a deprecated option. Instead, <samp class="option">localrtpport</samp> should be
-used.
 </p>
 </dd>
 <dt><samp class="option">localaddr=<var class="var">addr</var></samp></dt>
@@ -1830,8 +1862,16 @@ Once an announcement is received, it tries to receive that particular stream.
 <pre class="example-preformatted">sctp://<var class="var">host</var>:<var class="var">port</var>[?<var class="var">options</var>]
 </pre></div>
 
-<p>The protocol accepts the following options:
-</p><dl class="table">
+<p><var class="var">options</var> contains a list of &amp;-separated options of the form
+<var class="var">key</var>=<var class="var">val</var>. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+</p>
+<p>Options can also can be specified via command line options (or in code via
+<code class="code">AVOption</code>s).
+</p>
+<p>The list of supported options follows.
+</p>
+<dl class="table">
 <dt><samp class="option">listen</samp></dt>
 <dd><p>If set to any value, listen for an incoming connection. Outgoing connection is done by default.
 </p>
@@ -1852,18 +1892,13 @@ Once an announcement is received, it tries to receive that particular stream.
 </pre></div>
 
 <p><var class="var">options</var> contains a list of &amp;-separated options of the form
-<var class="var">key</var>=<var class="var">val</var>.
+<var class="var">key</var>=<var class="var">val</var>. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
 </p>
-<p>or
+<p>Options can also can be specified via command line options (or in code via
+<code class="code">AVOption</code>s).
 </p>
-<div class="example">
-<pre class="example-preformatted"><var class="var">options</var> srt://<var class="var">hostname</var>:<var class="var">port</var>
-</pre></div>
-
-<p><var class="var">options</var> contains a list of &rsquo;-<var class="var">key</var> <var class="var">val</var>&rsquo;
-options.
-</p>
-<p>This protocol accepts the following options.
+<p>The list of supported options follows.
 </p>
 <dl class="table">
 <dt><samp class="option">connect_timeout=<var class="var">milliseconds</var></samp></dt>
@@ -2261,7 +2296,11 @@ by |
 </pre></div>
 
 <p><var class="var">options</var> contains a list of &amp;-separated options of the form
-<var class="var">key</var>=<var class="var">val</var>.
+<var class="var">key</var>=<var class="var">val</var>. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+</p>
+<p>Options can also can be specified via command line options (or in code via
+<code class="code">AVOption</code>s).
 </p>
 <p>The list of supported options follows.
 </p>
@@ -2326,8 +2365,14 @@ ffplay tcp://<var class="var">hostname</var>:<var class="var">port</var>
 <pre class="example-preformatted">tls://<var class="var">hostname</var>:<var class="var">port</var>[?<var class="var">options</var>]
 </pre></div>
 
-<p>The following parameters can be set via command line options
-(or in code via <code class="code">AVOption</code>s):
+<p><var class="var">options</var> contains a list of &amp;-separated options of the form
+<var class="var">key</var>=<var class="var">val</var>. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+</p>
+<p>Options can also can be specified via command line options (or in code via
+<code class="code">AVOption</code>s).
+</p>
+<p>The list of supported options follows.
 </p>
 <dl class="table">
 <dt><samp class="option">ca_file, cafile=<var class="var">filename</var></samp></dt>
@@ -2338,7 +2383,7 @@ setups have defaults built in.
 The file must be in OpenSSL PEM format.
 </p>
 </dd>
-<dt><samp class="option">tls_verify=<var class="var">1|0</var></samp></dt>
+<dt><samp class="option">tls_verify, verify=<var class="var">1|0</var></samp></dt>
 <dd><p>If enabled, try to verify the peer that we are communicating with.
 Note, if using OpenSSL, this currently only makes sure that the
 peer certificate is signed by one of the root certificates in the CA
@@ -2387,8 +2432,106 @@ The proxy must support the CONNECT method.
 <pre class="example-preformatted">ffplay tls://<var class="var">hostname</var>:<var class="var">port</var>
 </pre></div>
 
+<a name="dtls"></a>
+<h3 class="section">3.43 dtls<span class="pull-right"><a class="anchor hidden-xs" href="#dtls" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-dtls" aria-hidden="true">TOC</a></span></h3>
+
+<p>Datagram Transport Layer Security (DTLS)
+</p>
+<p>The required syntax for a DTLS URL is:
+</p><div class="example">
+<pre class="example-preformatted">dtls://<var class="var">hostname</var>:<var class="var">port</var>[?<var class="var">options</var>]
+</pre></div>
+
+<p><var class="var">options</var> contains a list of &amp;-separated options of the form
+<var class="var">key</var>=<var class="var">val</var>. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+</p>
+<p>Options can also can be specified via command line options (or in code via
+<code class="code">AVOption</code>s).
+</p>
+<p>DTLS shares most options with TLS, but operates over UDP instead of TCP.
+</p>
+<p>The list of supported options follows.
+</p>
+<dl class="table">
+<dt><samp class="option">ca_file, cafile=<var class="var">filename</var></samp></dt>
+<dd><p>A file containing certificate authority (CA) root certificates to treat
+as trusted. If the linked TLS library contains a default this might not
+need to be specified for verification to work, but not all libraries and
+setups have defaults built in.
+The file must be in OpenSSL PEM format.
+</p>
+</dd>
+<dt><samp class="option">tls_verify, verify=<var class="var">1|0</var></samp></dt>
+<dd><p>If enabled, try to verify the peer that we are communicating with.
+Note, if using OpenSSL, this currently only makes sure that the
+peer certificate is signed by one of the root certificates in the CA
+database, but it does not validate that the certificate actually
+matches the host name we are trying to connect to.
+</p>
+<p>This is disabled by default since it requires a CA database to be
+provided by the caller in many cases.
+</p>
+</dd>
+<dt><samp class="option">cert_file, cert=<var class="var">filename</var></samp></dt>
+<dd><p>A file containing a certificate to use in the handshake with the peer.
+(When operating as server, in listen mode, this is more often required
+by the peer, while client certificates only are mandated in certain
+setups.)
+</p>
+</dd>
+<dt><samp class="option">key_file, key=<var class="var">filename</var></samp></dt>
+<dd><p>A file containing the private key for the certificate.
+</p>
+</dd>
+<dt><samp class="option">cert_pem=<var class="var">string</var></samp></dt>
+<dd><p>Certificate PEM string
+</p>
+</dd>
+<dt><samp class="option">key_pem=<var class="var">string</var></samp></dt>
+<dd><p>Private key PEM string
+</p>
+</dd>
+<dt><samp class="option">listen=<var class="var">1|0</var></samp></dt>
+<dd><p>If enabled, listen for connections on the provided port, and assume
+the server role in the handshake instead of the client role.
+</p>
+</dd>
+<dt><samp class="option">mtu=<var class="var">size</var></samp></dt>
+<dd><p>Set the Maximum Transmission Unit (MTU) for DTLS packets.
+</p>
+</dd>
+<dt><samp class="option">use_srtp=<var class="var">1|0</var></samp></dt>
+<dd><p>Enable the use_srtp DTLS extension.
+This is used in WebRTC applications to establish SRTP encryption keys
+through the DTLS handshake. Default is disabled.
+</p>
+</dd>
+<dt><samp class="option">external_sock=<var class="var">1|0</var></samp></dt>
+<dd><p>Use an external socket instead of creating a new one.
+This option only makes sense to pass when interacting with the code via
+API, enabling this from CLI will cause immediate failure.
+Default is disabled.
+</p>
+</dd>
+</dl>
+
+<p>Example command lines:
+</p>
+<p>To create a DTLS server:
+</p>
+<div class="example">
+<pre class="example-preformatted">ffmpeg -listen 1 -i dtls://<var class="var">hostname</var>:<var class="var">port</var> <var class="var">output</var>
+</pre></div>
+
+<p>To create a DTLS client and send data to server:
+</p>
+<div class="example">
+<pre class="example-preformatted">ffmpeg -i <var class="var">input</var> -f <var class="var">format</var> dtls://<var class="var">hostname</var>:<var class="var">port</var>
+</pre></div>
+
 <a name="udp"></a>
-<h3 class="section">3.43 udp<span class="pull-right"><a class="anchor hidden-xs" href="#udp" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-udp" aria-hidden="true">TOC</a></span></h3>
+<h3 class="section">3.44 udp<span class="pull-right"><a class="anchor hidden-xs" href="#udp" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-udp" aria-hidden="true">TOC</a></span></h3>
 
 <p>User Datagram Protocol.
 </p>
@@ -2397,7 +2540,12 @@ The proxy must support the CONNECT method.
 <pre class="example-preformatted">udp://<var class="var">hostname</var>:<var class="var">port</var>[?<var class="var">options</var>]
 </pre></div>
 
-<p><var class="var">options</var> contains a list of &amp;-separated options of the form <var class="var">key</var>=<var class="var">val</var>.
+<p><var class="var">options</var> contains a list of &amp;-separated options of the form
+<var class="var">key</var>=<var class="var">val</var>. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+</p>
+<p>Options can also can be specified via command line options (or in code via
+<code class="code">AVOption</code>s).
 </p>
 <p>In case threading is enabled on the system, a circular buffer is used
 to store the incoming data, which allows one to reduce loss of data due to
@@ -2442,6 +2590,10 @@ multicast groups.
 </dd>
 <dt><samp class="option">ttl=<var class="var">ttl</var></samp></dt>
 <dd><p>Set the time to live value (for multicast only).
+</p>
+</dd>
+<dt><samp class="option">dscp=<var class="var">dscp</var></samp></dt>
+<dd><p>Set the 6-bit DSCP field for outgoing packets.
 </p>
 </dd>
 <dt><samp class="option">connect=<var class="var">1|0</var></samp></dt>
@@ -2492,7 +2644,7 @@ a broadcast storm protection.
 </dl>
 
 <a name="Examples-1"></a>
-<h4 class="subsection">3.43.1 Examples<span class="pull-right"><a class="anchor hidden-xs" href="#Examples-1" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-Examples-1" aria-hidden="true">TOC</a></span></h4>
+<h4 class="subsection">3.44.1 Examples<span class="pull-right"><a class="anchor hidden-xs" href="#Examples-1" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-Examples-1" aria-hidden="true">TOC</a></span></h4>
 
 <ul class="itemize mark-bullet">
 <li>Use <code class="command">ffmpeg</code> to stream over UDP to a remote endpoint:
@@ -2513,7 +2665,7 @@ sized UDP packets, using a large input buffer:
 </li></ul>
 
 <a name="unix"></a>
-<h3 class="section">3.44 unix<span class="pull-right"><a class="anchor hidden-xs" href="#unix" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-unix" aria-hidden="true">TOC</a></span></h3>
+<h3 class="section">3.45 unix<span class="pull-right"><a class="anchor hidden-xs" href="#unix" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-unix" aria-hidden="true">TOC</a></span></h3>
 
 <p>Unix local socket
 </p>
@@ -2533,10 +2685,23 @@ sized UDP packets, using a large input buffer:
 <dt><samp class="option">listen</samp></dt>
 <dd><p>Create the Unix socket in listening mode.
 </p></dd>
+<dt><samp class="option">type</samp></dt>
+<dd><p>Select socket type.
+</p><dl class="table">
+<dt>&lsquo;<samp class="samp">stream Corresponds to SOCK_STREAM (reliable stream-oriented)</samp>&rsquo;</dt>
+<dt>&lsquo;<samp class="samp">datagram Corresponds to SOCK_DGRAM (unreliable packet-oriented)</samp>&rsquo;</dt>
+<dt>&lsquo;<samp class="samp">seqpacket Corresponds to SOCK_SEQPACKET (reliable packet-oriented)</samp>&rsquo;</dt>
+</dl>
+</dd>
+<dt><samp class="option">pkt_size</samp></dt>
+<dd><p>Maximum packet size for packet-oriented sockets (SOCK_DGRAM and
+SOCK_SEQPACKET). If greater than zero, this value is used as
+<code class="code">max_packet_size</code>. Ignored for SOCK_STREAM. Default is <code class="code">0</code>.
+</p></dd>
 </dl>
 
 <a name="zmq"></a>
-<h3 class="section">3.45 zmq<span class="pull-right"><a class="anchor hidden-xs" href="#zmq" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-zmq" aria-hidden="true">TOC</a></span></h3>
+<h3 class="section">3.46 zmq<span class="pull-right"><a class="anchor hidden-xs" href="#zmq" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-zmq" aria-hidden="true">TOC</a></span></h3>
 
 <p>ZeroMQ asynchronous messaging using the libzmq library.
 </p>

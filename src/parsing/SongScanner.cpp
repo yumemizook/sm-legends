@@ -50,6 +50,14 @@ int SongScanner::ScanDirectory(const std::string& root_path) {
         entry.offset    = simfile->offset;
         entry.num_charts = static_cast<int>(simfile->charts.size());
 
+        // Filter out unsupported charts before extracting summaries
+        simfile->charts.erase(std::remove_if(simfile->charts.begin(), simfile->charts.end(), [](const auto& chart) {
+            return chart.chart_type != "dance-single" &&
+                   chart.chart_type != "dance-double" &&
+                   chart.chart_type != "dance-couple" &&
+                   chart.chart_type != "dance-routine";
+        }), simfile->charts.end());
+
         // Sort charts by difficulty meter so they display from easiest to hardest
         std::sort(simfile->charts.begin(), simfile->charts.end(), [](const auto& a, const auto& b) {
             return a.difficulty_meter < b.difficulty_meter;
@@ -57,13 +65,6 @@ int SongScanner::ScanDirectory(const std::string& root_path) {
 
         // Extract chart summaries
         for (const auto& chart : simfile->charts) {
-            // Only include specific 4-panel and 8-panel dance charts
-            if (chart.chart_type != "dance-single" &&
-                chart.chart_type != "dance-double" &&
-                chart.chart_type != "dance-couple" &&
-                chart.chart_type != "dance-routine") {
-                continue;
-            }
 
             SongEntry::ChartInfo info;
             info.chart_type       = chart.chart_type;
@@ -112,6 +113,20 @@ bool SongScanner::EnsureLoaded(size_t index) {
         last_error_ = "Failed to reload: " + entry.filepath;
         return false;
     }
+
+    // Filter out unsupported charts to match what we did in ScanDirectory
+    entry.simfile->charts.erase(std::remove_if(entry.simfile->charts.begin(), entry.simfile->charts.end(), [](const auto& chart) {
+        return chart.chart_type != "dance-single" &&
+               chart.chart_type != "dance-double" &&
+               chart.chart_type != "dance-couple" &&
+               chart.chart_type != "dance-routine";
+    }), entry.simfile->charts.end());
+
+    // Sort charts by difficulty meter so they display from easiest to hardest
+    std::sort(entry.simfile->charts.begin(), entry.simfile->charts.end(), [](const auto& a, const auto& b) {
+        return a.difficulty_meter < b.difficulty_meter;
+    });
+
     return true;
 }
 

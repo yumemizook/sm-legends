@@ -331,6 +331,7 @@ bool GameWindow::LoadSimfile(const std::string& filepath, int chart_index) {
         return false;
     }
     current_chart_ = &simfile->charts[static_cast<size_t>(chart_index)];
+    SetupPlayerFieldLayout();
     conductor_.Initialize(*simfile, *current_chart_);
     active_simfile_ = simfile.get();
     loaded_simfile_ = std::move(simfile);
@@ -660,12 +661,14 @@ void GameWindow::HandleKeyDown_SongSelect(SDL_Keycode key) {
 
         case SDLK_TAB:
             // Toggle preferred mode: Single <-> Double
-            preferred_mode_ = (preferred_mode_ == 0) ? 1 : 0;
-            UpdateFilteredSongs();
-            // Reset chart selections when toggling
-            for (int i = 0; i < MAX_PLAYERS; ++i) {
-                selected_chart_[i] = 0;
-                players_[i].ready = false;
+            if (num_active_players_ <= 1) {
+                preferred_mode_ = (preferred_mode_ == 0) ? 1 : 0;
+                UpdateFilteredSongs();
+                // Reset chart selections when toggling
+                for (int i = 0; i < MAX_PLAYERS; ++i) {
+                    selected_chart_[i] = 0;
+                    players_[i].ready = false;
+                }
             }
             break;
     }
@@ -973,6 +976,12 @@ void GameWindow::HandleModifierMenuInput(int p, SDL_Keycode key) {
                 break;
             case 11: // BGA Brightness
                 ps.bga_brightness = static_cast<BGABrightness>((static_cast<int>(ps.bga_brightness) + 1) % 5);
+                // Share with other players
+                for (int i = 0; i < MAX_PLAYERS; ++i) {
+                    if (i != p && players_[i].joined) {
+                        players_[i].bga_brightness = ps.bga_brightness;
+                    }
+                }
                 break;
             default: break;
         }
@@ -1191,7 +1200,8 @@ void GameWindow::StartGameplay(size_t song_index, size_t chart_index) {
         
         auto& ps = players_[p];
         ps.ResetGameplay();
-        ps.current_chart = &active_simfile_->charts[c_idx];
+        ps.base_chart = &active_simfile_->charts[c_idx];
+        ps.current_chart = ps.base_chart;
         
         // --- Routine/Pseudo-Routine Handling ---
         bool is_routine = (ps.current_chart->chart_type == "dance-routine" || ps.current_chart->chart_type == "dance-couple");
@@ -1252,6 +1262,7 @@ void GameWindow::StartGameplay(size_t song_index, size_t chart_index) {
 
     // Legacy sync
     current_chart_ = master_chart; 
+    SetupPlayerFieldLayout();
     
     loaded_simfile_.reset();
     auto_bga_file_ = ""; // Reset auto-discovered BGA before DECIDE screen

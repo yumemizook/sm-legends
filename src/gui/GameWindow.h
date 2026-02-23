@@ -228,6 +228,7 @@ struct PlayerState {
     double clear_animation_timer = 0.0;
     
     // Independent chart state
+    const NoteChart* base_chart = nullptr;
     const NoteChart* current_chart = nullptr;
     NoteChart runtime_chart;
     double chart_end_time = 0.0;
@@ -297,6 +298,7 @@ struct PlayerState {
         combo_pop_timer = 0.0;
         next_hittable_note = 0;
         total_hittable_notes = 0;
+        // Do NOT clear base_chart
         current_chart = nullptr;
         chart_finished = false;
         results_delay = 1.5;
@@ -560,6 +562,7 @@ private:
     int  selected_song_  = 0;
     std::vector<int> filtered_songs_; // Maps wheel index -> scanner index
     void UpdateFilteredSongs();
+    int  GetFirstValidChart(int song_index) const;
     int  selected_chart_[MAX_PLAYERS] = {0, 0};
     int  scroll_offset_  = 0;
     int  visible_songs_  = 12;

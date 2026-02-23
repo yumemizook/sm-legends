@@ -20,6 +20,25 @@
 namespace fs = std::filesystem;
 
 int main(int argc, char* argv[]) {
+    // Ensure the working directory is the root of the project (parent of 'build')
+    // so that 'assets', 'charts', and 'sprites' can be found regardless of launch location.
+    try {
+        fs::path exe_path = fs::absolute(fs::path(argv[0]));
+        fs::path exe_dir = exe_path.parent_path();
+        
+        // If the executable is in a 'build' or 'bin' folder, go up one level to the root
+        if (exe_dir.filename() == "build" || exe_dir.filename() == "bin" || exe_dir.filename() == "Debug" || exe_dir.filename() == "Release") {
+            fs::current_path(exe_dir.parent_path());
+        } else {
+            fs::current_path(exe_dir);
+        }
+    } catch (const std::exception& e) {
+        std::printf("Warning: Could not set working directory: %s\n", e.what());
+    }
+
+    freopen("debug_out.txt", "w", stdout);
+    freopen("debug_err.txt", "w", stderr);
+    
     sml::GameWindow window;
 
     if (!window.Init(1000, 700, "SM-Legends")) {

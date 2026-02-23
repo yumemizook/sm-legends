@@ -1,0 +1,111 @@
+Preset CMake variables:
+
+  CMAKE_TOOLCHAIN_FILE:FILEPATH="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+-- Running vcpkg install
+Fetching registry information from https://github.com/microsoft/vcpkg (HEAD)...
+Detecting compiler hash for triplet x64-windows...
+Compiler found: C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe
+The following packages will be built and installed:
+  * brotli:x64-windows@1.2.0 -- git+https://github.com/microsoft/vcpkg@0fb79bb13588702a9e06057745b4aed95ce5c861
+  * bzip2[core,tool]:x64-windows@1.0.8#6 -- git+https://github.com/microsoft/vcpkg@2d029da682847c5ebdc54e4dbea001331a02207e
+  * freetype[brotli,bzip2,core,png,zlib]:x64-windows@2.13.3 -- git+https://github.com/microsoft/vcpkg@8a2c633dcc14eaabdb31cf4637242f4e3c2f3fa2
+  * libogg:x64-windows@1.3.6#1 -- git+https://github.com/microsoft/vcpkg@0631c72b35b0e169220b9c0fa9a6af4b229268cb
+  * libpng:x64-windows@1.6.55 -- git+https://github.com/microsoft/vcpkg@f300cf728bdcc0e998f18a520467cfdae5667bdf
+  * libvorbis:x64-windows@1.3.7#4 -- git+https://github.com/microsoft/vcpkg@149b8037ad8023f0f1b130616cf1a90238083cb0
+    sdl2:x64-windows@2.32.10 -- git+https://github.com/microsoft/vcpkg@af36a2c0ace7069e28bded20480ebbaf4e9c6e98
+    sdl2-mixer[core,wavpack]:x64-windows@2.8.1#2 -- git+https://github.com/microsoft/vcpkg@ee2053a681764a5fda41536fee42df58397d0c37
+    sdl2-ttf:x64-windows@2.24.0 -- git+https://github.com/microsoft/vcpkg@995d7a81d6f8f61f36c7ea9e09da414a824c15b1
+    stb:x64-windows@2024-07-29#1 -- git+https://github.com/microsoft/vcpkg@c362152d1d02973e7b1ce777960f8a6876656560
+  * vcpkg-cmake:x64-windows@2024-04-23 -- git+https://github.com/microsoft/vcpkg@e74aa1e8f93278a8e71372f1fa08c3df420eb840
+  * vcpkg-cmake-config:x64-windows@2024-05-23 -- git+https://github.com/microsoft/vcpkg@97a63e4bc1a17422ffe4eff71da53b4b561a7841
+  * wavpack:x64-windows@5.9.0 -- git+https://github.com/microsoft/vcpkg@c1135a4bf0e9a8dd1c07fffa886e75ec6ee60386
+  * zlib:x64-windows@1.3.1 -- git+https://github.com/microsoft/vcpkg@3f05e04b9aededb96786a911a16193cdb711f0c9
+Additional packages (*) will be modified to complete this operation.
+Restored 14 package(s) from C:\Users\ng123\AppData\Local\vcpkg\archives in 343 ms. Use --debug to see more details.
+Installing 1/14 vcpkg-cmake-config:x64-windows@2024-05-23...
+Elapsed time to handle vcpkg-cmake-config:x64-windows: 7.65 ms
+vcpkg-cmake-config:x64-windows package ABI: be68d4d6ca4f94c76dd3f86d802cd79f3088c82e72f043677dac420c5390a52a
+Installing 2/14 vcpkg-cmake:x64-windows@2024-04-23...
+Elapsed time to handle vcpkg-cmake:x64-windows: 8.01 ms
+vcpkg-cmake:x64-windows package ABI: 4a20965fb7e9fc68dab964f4b935d56b56a781ac86d90dfb1796864029b83836
+Installing 3/14 sdl2:x64-windows@2.32.10...
+Elapsed time to handle sdl2:x64-windows: 53.5 ms
+sdl2:x64-windows package ABI: 6c7d89aeac0b88a0b6ac147f14465eb2223f61a166ea614e5f1db22f59570d02
+Installing 4/14 wavpack:x64-windows@5.9.0...
+Elapsed time to handle wavpack:x64-windows: 20.7 ms
+wavpack:x64-windows package ABI: 3d7634b21c270c048171eda08f7d4c626c4014ab77188b23cad3501e401fb3f3
+Installing 5/14 libogg:x64-windows@1.3.6#1...
+Elapsed time to handle libogg:x64-windows: 16.3 ms
+libogg:x64-windows package ABI: c281b41328f917353d7d6ebd82dc11c4b906b1c78f046fe0cbecb602ca2ddd3e
+Installing 6/14 libvorbis:x64-windows@1.3.7#4...
+Elapsed time to handle libvorbis:x64-windows: 24.4 ms
+libvorbis:x64-windows package ABI: b7718887e46d71420edd9f8731f4c0333510785c8390e5e2e4835e8451537995
+Installing 7/14 sdl2-mixer[core,wavpack]:x64-windows@2.8.1#2...
+Elapsed time to handle sdl2-mixer:x64-windows: 14.8 ms
+sdl2-mixer:x64-windows package ABI: d31708c613a25c7862d94899365320ea3ae5e8c681ba7446fd5d60cd09944767
+Installing 8/14 zlib:x64-windows@1.3.1...
+Elapsed time to handle zlib:x64-windows: 9.77 ms
+zlib:x64-windows package ABI: 7a5b5e5eed1421b12fa4c6863a2df5d58fafccf5f36479723a7506059fcc6c03
+Installing 9/14 libpng:x64-windows@1.6.55...
+Elapsed time to handle libpng:x64-windows: 17.2 ms
+libpng:x64-windows package ABI: 5b5faaa7d130c0a287f3f0da82b3ab30c88c51478b9e16d93c123cddb8431bf6
+Installing 10/14 bzip2[core,tool]:x64-windows@1.0.8#6...
+Elapsed time to handle bzip2:x64-windows: 13.9 ms
+bzip2:x64-windows package ABI: f089870d6859c3dd7c6d159bbfbfbbdb75246da9de0d5890cb201cc61c13e3a5
+Installing 11/14 brotli:x64-windows@1.2.0...
+Elapsed time to handle brotli:x64-windows: 20 ms
+brotli:x64-windows package ABI: ba788e57ccdb3cb8d34fbf1bea70f11c50815f856ef3e72aa7404c365e282459
+Installing 12/14 freetype[brotli,bzip2,core,png,zlib]:x64-windows@2.13.3...
+Elapsed time to handle freetype:x64-windows: 43 ms
+freetype:x64-windows package ABI: 1c562da93c7af4818edfba85f37a0b438a17472e4de006d71ea292e55f94d9e1
+Installing 13/14 sdl2-ttf:x64-windows@2.24.0...
+Elapsed time to handle sdl2-ttf:x64-windows: 12.9 ms
+sdl2-ttf:x64-windows package ABI: 41cb975efe8f51bcd32339d30d19dcbf4704c33651fbc8f32aa10f5ab86ecfac
+Installing 14/14 stb:x64-windows@2024-07-29#1...
+Elapsed time to handle stb:x64-windows: 15.3 ms
+stb:x64-windows package ABI: 117ca384e930f341f349ed74179cfac5e4bb48bf35ca0bce27dcc2dda0b90a3b
+Installed contents are licensed to you by owners. Microsoft is not responsible for, nor does it grant any licenses to, third-party packages.
+Packages installed in this vcpkg installation declare the following licenses:
+(FTL OR GPL-2.0-or-later)
+(MIT OR CC-PDDC)
+BSD-3-Clause
+MIT
+Zlib
+bzip2-1.0.6
+libpng-2.0
+sdl2 provides CMake targets:
+
+    find_package(SDL2 CONFIG REQUIRED)
+    target_link_libraries(main
+        PRIVATE
+        $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
+        $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+    )
+
+sdl2-mixer provides CMake targets:
+
+    find_package(SDL2_mixer CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE $<IF:$<TARGET_EXISTS:SDL2_mixer::SDL2_mixer>,SDL2_mixer::SDL2_mixer,SDL2_mixer::SDL2_mixer-static>)
+
+sdl2-ttf provides CMake targets:
+
+    find_package(SDL2_ttf CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE $<IF:$<TARGET_EXISTS:SDL2_ttf::SDL2_ttf>,SDL2_ttf::SDL2_ttf,SDL2_ttf::SDL2_ttf-static>)
+
+The package stb provides CMake targets:
+
+    find_package(Stb REQUIRED)
+    target_include_directories(main PRIVATE ${Stb_INCLUDE_DIR})
+All requested installations completed successfully in: 285 ms
+-- Running vcpkg install - done
+-- The CXX compiler identification is MSVC 19.44.35223.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Using local dependencies from: C:/sm-legends/build/vcpkg_installed/x64-windows
+-- Configuring done (14.3s)
+-- Generating done (0.1s)
+-- Build files have been written to: C:/sm-legends/build

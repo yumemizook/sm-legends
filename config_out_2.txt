@@ -1,0 +1,67 @@
+Preset CMake variables:
+
+  CMAKE_TOOLCHAIN_FILE:FILEPATH="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+-- Running vcpkg install
+Detecting compiler hash for triplet x64-windows...
+Compiler found: C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe
+The following packages are already installed:
+  * brotli:x64-windows@1.2.0 -- git+https://github.com/microsoft/vcpkg@0fb79bb13588702a9e06057745b4aed95ce5c861
+  * bzip2[core,tool]:x64-windows@1.0.8#6 -- git+https://github.com/microsoft/vcpkg@2d029da682847c5ebdc54e4dbea001331a02207e
+  * freetype[brotli,bzip2,core,png,zlib]:x64-windows@2.13.3 -- git+https://github.com/microsoft/vcpkg@8a2c633dcc14eaabdb31cf4637242f4e3c2f3fa2
+  * libogg:x64-windows@1.3.6#1 -- git+https://github.com/microsoft/vcpkg@0631c72b35b0e169220b9c0fa9a6af4b229268cb
+  * libpng:x64-windows@1.6.55 -- git+https://github.com/microsoft/vcpkg@f300cf728bdcc0e998f18a520467cfdae5667bdf
+  * libvorbis:x64-windows@1.3.7#4 -- git+https://github.com/microsoft/vcpkg@149b8037ad8023f0f1b130616cf1a90238083cb0
+    sdl2:x64-windows@2.32.10 -- git+https://github.com/microsoft/vcpkg@af36a2c0ace7069e28bded20480ebbaf4e9c6e98
+    sdl2-mixer[core,wavpack]:x64-windows@2.8.1#2 -- git+https://github.com/microsoft/vcpkg@ee2053a681764a5fda41536fee42df58397d0c37
+    sdl2-ttf:x64-windows@2.24.0 -- git+https://github.com/microsoft/vcpkg@995d7a81d6f8f61f36c7ea9e09da414a824c15b1
+    stb:x64-windows@2024-07-29#1 -- git+https://github.com/microsoft/vcpkg@c362152d1d02973e7b1ce777960f8a6876656560
+  * vcpkg-cmake:x64-windows@2024-04-23 -- git+https://github.com/microsoft/vcpkg@e74aa1e8f93278a8e71372f1fa08c3df420eb840
+  * vcpkg-cmake-config:x64-windows@2024-05-23 -- git+https://github.com/microsoft/vcpkg@97a63e4bc1a17422ffe4eff71da53b4b561a7841
+  * wavpack:x64-windows@5.9.0 -- git+https://github.com/microsoft/vcpkg@c1135a4bf0e9a8dd1c07fffa886e75ec6ee60386
+  * zlib:x64-windows@1.3.1 -- git+https://github.com/microsoft/vcpkg@3f05e04b9aededb96786a911a16193cdb711f0c9
+sdl2 provides CMake targets:
+
+    find_package(SDL2 CONFIG REQUIRED)
+    target_link_libraries(main
+        PRIVATE
+        $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
+        $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+    )
+
+sdl2-mixer provides CMake targets:
+
+    find_package(SDL2_mixer CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE $<IF:$<TARGET_EXISTS:SDL2_mixer::SDL2_mixer>,SDL2_mixer::SDL2_mixer,SDL2_mixer::SDL2_mixer-static>)
+
+sdl2-ttf provides CMake targets:
+
+    find_package(SDL2_ttf CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE $<IF:$<TARGET_EXISTS:SDL2_ttf::SDL2_ttf>,SDL2_ttf::SDL2_ttf,SDL2_ttf::SDL2_ttf-static>)
+
+The package stb provides CMake targets:
+
+    find_package(Stb REQUIRED)
+    target_include_directories(main PRIVATE ${Stb_INCLUDE_DIR})
+All requested installations completed successfully in: 1.27 ms
+-- Running vcpkg install - done
+-- Using local dependencies from: C:/sm-legends/vcpkg/installed/x64-windows
+-- Configuring done (5.0s)
+CMake Error in CMakeLists.txt:
+  Imported target "SDL2::SDL2" includes non-existent path
+
+    "C:/sm-legends/vcpkg/installed/x64-windows/include"
+
+  in its INTERFACE_INCLUDE_DIRECTORIES.  Possible reasons include:
+
+  * The path was deleted, renamed, or moved to another location.
+
+  * An install or uninstall procedure did not complete successfully.
+
+  * The installation package was faulty and references files it does not
+  provide.
+
+
+
+-- Generating done (0.1s)
+CMake Generate step failed.  Build files cannot be regenerated correctly.

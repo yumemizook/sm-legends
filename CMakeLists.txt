@@ -9,7 +9,11 @@ if(MSVC)
 endif()
 
 # Manual dependency setup - Bypass vcpkg manifest mode to avoid hangs
-set(VCPKG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/installed/x64-windows")
+if(EXISTS "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows")
+    set(VCPKG_ROOT "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows")
+else()
+    set(VCPKG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/installed/x64-windows")
+endif()
 message(STATUS "Using local dependencies from: ${VCPKG_ROOT}")
 
 # FFmpeg
@@ -27,6 +31,8 @@ endforeach()
 if(NOT TARGET SDL2::SDL2)
     add_library(SDL2::SDL2 UNKNOWN IMPORTED)
     set_target_properties(SDL2::SDL2 PROPERTIES
+        IMPORTED_LOCATION_DEBUG "${VCPKG_ROOT}/debug/lib/SDL2d.lib"
+        IMPORTED_LOCATION_RELEASE "${VCPKG_ROOT}/lib/SDL2.lib"
         IMPORTED_LOCATION "${VCPKG_ROOT}/lib/SDL2.lib"
         INTERFACE_INCLUDE_DIRECTORIES "${VCPKG_ROOT}/include;${VCPKG_ROOT}/include/SDL2")
 endif()
@@ -35,6 +41,8 @@ endif()
 if(NOT TARGET SDL2_mixer::SDL2_mixer)
     add_library(SDL2_mixer::SDL2_mixer UNKNOWN IMPORTED)
     set_target_properties(SDL2_mixer::SDL2_mixer PROPERTIES
+        IMPORTED_LOCATION_DEBUG "${VCPKG_ROOT}/debug/lib/SDL2_mixerd.lib"
+        IMPORTED_LOCATION_RELEASE "${VCPKG_ROOT}/lib/SDL2_mixer.lib"
         IMPORTED_LOCATION "${VCPKG_ROOT}/lib/SDL2_mixer.lib"
         INTERFACE_INCLUDE_DIRECTORIES "${VCPKG_ROOT}/include;${VCPKG_ROOT}/include/SDL2")
 endif()
@@ -43,6 +51,8 @@ endif()
 if(NOT TARGET SDL2_ttf::SDL2_ttf)
     add_library(SDL2_ttf::SDL2_ttf UNKNOWN IMPORTED)
     set_target_properties(SDL2_ttf::SDL2_ttf PROPERTIES
+        IMPORTED_LOCATION_DEBUG "${VCPKG_ROOT}/debug/lib/SDL2_ttfd.lib"
+        IMPORTED_LOCATION_RELEASE "${VCPKG_ROOT}/lib/SDL2_ttf.lib"
         IMPORTED_LOCATION "${VCPKG_ROOT}/lib/SDL2_ttf.lib"
         INTERFACE_INCLUDE_DIRECTORIES "${VCPKG_ROOT}/include;${VCPKG_ROOT}/include/SDL2")
 endif()
@@ -51,6 +61,8 @@ endif()
 if(NOT TARGET SDL2::SDL2main)
     add_library(SDL2::SDL2main UNKNOWN IMPORTED)
     set_target_properties(SDL2::SDL2main PROPERTIES
+        IMPORTED_LOCATION_DEBUG "${VCPKG_ROOT}/debug/lib/manual-link/SDL2maind.lib"
+        IMPORTED_LOCATION_RELEASE "${VCPKG_ROOT}/lib/manual-link/SDL2main.lib"
         IMPORTED_LOCATION "${VCPKG_ROOT}/lib/manual-link/SDL2main.lib")
 endif()
 
@@ -153,6 +165,22 @@ if(WIN32)
     # Link SDL2main for WinMain wrapper
     if(TARGET SDL2::SDL2main)
         target_link_libraries(sm-legends-gui PRIVATE SDL2::SDL2main)
+    endif()
+
+    # Copy DLLs from vcpkg to the output directory so the executable can run
+    add_custom_command(TARGET sm-legends-gui POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "$<IF:$<CONFIG:Debug>,${VCPKG_ROOT}/debug/bin,${VCPKG_ROOT}/bin>"
+        "$<TARGET_FILE_DIR:sm-legends-gui>"
+    )
+    
+    # Copy DLLs from FFmpeg bin directory
+    if(EXISTS "${FFMPEG_ROOT}/bin")
+        add_custom_command(TARGET sm-legends-gui POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${FFMPEG_ROOT}/bin"
+            "$<TARGET_FILE_DIR:sm-legends-gui>"
+        )
     endif()
 endif()
 
