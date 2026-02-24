@@ -42,10 +42,12 @@ int SongScanner::ScanDirectory(const std::string& root_path) {
         entry.directory = fs::path(filepath).parent_path().string();
         entry.title     = simfile->title.empty() ? fs::path(filepath).stem().string() : simfile->title;
         entry.artist    = simfile->artist;
+        entry.background_path = simfile->background_path.empty() ? "" : (fs::path(entry.directory) / simfile->background_path).string();
         entry.jacket_path = SimfileParser::FindJacket(entry.directory, {
             simfile->jacket_path,
             simfile->cover_path,
-            simfile->banner_path
+            simfile->banner_path,
+            simfile->background_path
         });
         entry.offset    = simfile->offset;
         entry.num_charts = static_cast<int>(simfile->charts.size());

@@ -11,6 +11,7 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <map>
 
 namespace fs = std::filesystem;
 
@@ -82,7 +83,54 @@ std::unique_ptr<Simfile> SimfileParser::LoadFromString(
     for (auto& chart : simfile->charts) {
         chart.radar = ChartAnalyzer::CalculateRadar(chart, simfile.get());
         chart.custom_difficulty = ChartAnalyzer::CalculateCustomDifficulty(chart, chart.radar);
+        
+        // --- STAR RATING (CO-OP) ---
+        if (chart.chart_type == "dance-couple" || chart.chart_type == "dance-routine") {
+            chart.star_rating = ChartAnalyzer::CalculateStarRating(chart, chart.radar);
+            // Optionally override difficulty display if we want Stars to be primary
+            // chart.custom_difficulty = 0.0; 
+        }
+
         chart.variant = ChartAnalyzer::DetectChartVariant(chart);
+    }
+
+    // --- ENFORCE PROGRESSION ---
+    // Group by chart type (dance-single, dance-double, etc)
+    std::map<std::string, std::vector<NoteChart*>> type_groups;
+    for (auto& chart : simfile->charts) {
+        type_groups[chart.chart_type].push_back(&chart);
+    }
+
+    auto get_diff_rank = [](const std::string& name) {
+        std::string n = name;
+        for (auto& c : n) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (n == "beginner") return 0;
+        if (n == "easy") return 1;
+        if (n == "medium") return 2;
+        if (n == "hard") return 3;
+        if (n == "challenge") return 4;
+        return 5; // Edit or other
+    };
+
+    for (auto& pair : type_groups) {
+        auto& group_charts = pair.second;
+        // Sort by difficulty rank
+        std::sort(group_charts.begin(), group_charts.end(), [&](NoteChart* a, NoteChart* b) {
+            return get_diff_rank(a->difficulty_name) < get_diff_rank(b->difficulty_name);
+        });
+
+        // Enforce difficulty[i] >= difficulty[i-1] + 0.1
+        for (size_t i = 1; i < group_charts.size(); ++i) {
+            int rank_i = get_diff_rank(group_charts[i]->difficulty_name);
+            int rank_prev = get_diff_rank(group_charts[i-1]->difficulty_name);
+            
+            // Only enforce between standard categories if they are in order
+            if (rank_i > rank_prev && rank_i < 5) {
+                if (group_charts[i]->custom_difficulty < group_charts[i-1]->custom_difficulty + 0.1) {
+                    group_charts[i]->custom_difficulty = group_charts[i-1]->custom_difficulty + 0.1;
+                }
+            }
+        }
     }
 
     return simfile;

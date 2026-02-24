@@ -51,6 +51,7 @@ struct Profile {
     float  hidden_plus  = 0.0f;
     int    bga_brightness = 1;  ///< 0=Lighter, 1=Normal, 2=Dark, 3=Darker, 4=Darkest
     bool   ex_mode      = false;
+    std::string last_folder = "MAIN SONGS"; ///< Last opened folder in Song Select
 
     // Rating (separate for single and double)
     double rating_single = 0.0;  ///< Aggregate single-mode rating (avg of top N)
@@ -126,6 +127,7 @@ struct Profile {
         std::fprintf(f, "hidden_plus=%.2f\n", hidden_plus);
         std::fprintf(f, "bga_brightness=%d\n", bga_brightness);
         std::fprintf(f, "ex_mode=%d\n", ex_mode ? 1 : 0);
+        std::fprintf(f, "last_folder=%s\n", last_folder.c_str());
         std::fprintf(f, "rating_single=%.4f\n", rating_single);
         std::fprintf(f, "rating_double=%.4f\n", rating_double);
         std::fclose(f);
@@ -172,6 +174,7 @@ struct Profile {
                 else if (skey == "hidden_plus")      hidden_plus = static_cast<float>(std::atof(val));
                 else if (skey == "bga_brightness")   bga_brightness = std::atoi(val);
                 else if (skey == "ex_mode")          ex_mode = (std::atoi(val) != 0);
+                else if (skey == "last_folder")      last_folder = val;
                 else if (skey == "rating_single")    rating_single = std::atof(val);
                 else if (skey == "rating_double")    rating_double = std::atof(val);
                 else if (skey == "overall_rating") {
@@ -225,6 +228,7 @@ struct Profile {
         hidden_plus = 0.0f;
         bga_brightness = 1;
         ex_mode = false;
+        last_folder = "MAIN SONGS";
         rating_single = 0.0;
         rating_double = 0.0;
         high_scores.clear();

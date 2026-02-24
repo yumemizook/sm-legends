@@ -117,9 +117,12 @@ RadarValues ChartAnalyzer::CalculateRadar(const NoteChart& chart, const Simfile*
         double frac = b - std::floor(b);
         const double EPS = 0.001;
         
-        // Check 4th, 8th, 16th
+        // Check 4th, 8th, 12th, 16th
+        // 12th = frac * 3 is integer
         bool is_simple = false;
         if (std::abs(frac * 4 - std::round(frac * 4)) < EPS) is_simple = true;
+        else if (std::abs(frac * 3 - std::round(frac * 3)) < EPS) is_simple = true;
+        
         if (!is_simple) notes_not_4th_8th++;
     }
     
@@ -148,37 +151,27 @@ RadarValues ChartAnalyzer::CalculateRadar(const NoteChart& chart, const Simfile*
     }
     double avg_stream_nps = stream_count > 0 ? (stream_sum / stream_count) : 0.0;
     
-    // Scale: 15 NPS -> 30 Rating?
-    // Formula: Rating = NPS * 2.0?
-    // 10 NPS = 20. 15 NPS = 30.
-    radar.stream = std::max(0.0, avg_stream_nps * 3.8 - 6.0);
+    // Double Balancing Factor
+    double double_factor = chart.Is8Lane() ? 0.65 : 1.0;
+
+    // --- STREAM ---
+    radar.stream = std::max(avg_stream_nps * 1.5, avg_stream_nps * 3.8 - 6.0) * double_factor;
 
     // --- VOLTAGE ---
-    // Peak NPS
-    // Scale: 20 NPS -> 30 Rating?
-    // Formula: Rating = Peak * 1.5
-    radar.voltage = std::max(0.0, max_nps * 1.8 - 4.0);
+    radar.voltage = std::max(max_nps * 1.0, max_nps * 1.8 - 4.0) * double_factor;
 
     // --- AIR ---
-    // Jumps Per Second (JPS)
     double jps = jump_times.size() / song_duration;
-    // Scale: 4 JPS -> 30 Rating? (Heavy jumpstream ~ 3-4 jumps/sec)
-    // Formula: Rating = JPS * 8.0
-    radar.air = std::max(0.0, jps * 15.0 - 5.0);
+    radar.air = std::max(jps * 5.0, jps * 15.0 - 5.0) * double_factor;
 
     // --- FREEZE ---
-    // Hold count density?
-    // Scale: Hold heads per second?
     double hps = (double)total_holds / song_duration;
-    // Rating = HPS * 10.0 + (holds usually implies tech)
-    radar.freeze = std::max(0.0, hps * 30.0 - 5.0); 
+    radar.freeze = std::max(hps * 10.0, hps * 30.0 - 5.0) * (chart.Is8Lane() ? 0.8 : 1.0); // Holds are easier on double? slightly less reduction
 
     // --- CHAOS ---
-    // Ratio of complex notes
     double chaos_ratio = 0.0;
     if (!note_times.empty()) chaos_ratio = (double)notes_not_4th_8th / note_times.size();
-    // Scale: 50% chaos -> 30 Rating
-    radar.chaos = std::max(0.0, chaos_ratio * 75.0 - 10.0); // if 0.53 -> 30.
+    radar.chaos = std::max(chaos_ratio * 25.0, chaos_ratio * 75.0 - 10.0); // No double factor for rhythm complexity
 
     // Clamp all to 0-30 (+epsilon visually)
     // Actually user wants 1-30 integers.
@@ -197,15 +190,70 @@ double ChartAnalyzer::CalculateCustomDifficulty(const NoteChart& chart, const Ra
     double max_val = std::max({radar.stream, radar.voltage, radar.air, radar.freeze, radar.chaos});
     double avg_val = (radar.stream + radar.voltage + radar.air + radar.freeze + radar.chaos) / 5.0;
     
-    // Formula: 95% Max + 5% Avg
-    double rating = max_val * 0.95 + avg_val * 0.05;
+    // --- HIGH END BONUSES ---
+    // 1. Technicality Multiplier
+    double tech_bonus = 0.0;
+    if (radar.chaos > 15.0) tech_bonus += (radar.chaos - 15.0) * 0.1; // Extra 0.1 per point above 15
+    if (radar.air > 20.0) tech_bonus += (radar.air - 20.0) * 0.05;   // Extra 0.05 per point above 20
+    
+    // 2. Endurance Bonus
+    if (radar.stream > 20.0 && radar.voltage > 15.0) {
+        tech_bonus += 0.5; // Flat bonus for heavy stream + peaks
+    }
+
+    // Formula: 90% Max + 10% Avg + bonus
+    double rating = max_val * 0.90 + avg_val * 0.10 + tech_bonus;
     
     // Round to 1 decimal place
-    // e.g. 15.44 -> 15.4
     double r = std::round(rating * 10.0) / 10.0;
     
     if (r < 1.0) r = 1.0;
     if (r > 30.4) r = 30.4;
+    return r;
+}
+
+double ChartAnalyzer::CalculateStarRating(const NoteChart& chart, const RadarValues& radar) {
+    if (!chart.Is8Lane()) return 0.0;
+
+    // 1. Base Density (Normalized NPS for 2 players)
+    // radar.stream and radar.voltage already have a 0.65 factor for double.
+    // Let's use their raw contribution to stars.
+    double density_stars = (radar.stream * 0.2) + (radar.voltage * 0.1); // Max ~6 stars from pure density if metrics are 20-30
+    
+    // 2. Synergy Factor (Sync Hits)
+    // How many rows have notes for BOTH players?
+    int sync_rows = 0;
+    int total_rows = (int)chart.note_rows.size();
+    
+    for (const auto& row : chart.note_rows) {
+        bool p1 = false;
+        bool p2 = false;
+        // P1: lanes 0-3, P2: lanes 4-7
+        for (int i = 0; i < 4 && i < (int)row.columns.size(); ++i) {
+            if (row.columns[i] != NoteType::None) p1 = true;
+        }
+        for (int i = 4; i < 8 && i < (int)row.columns.size(); ++i) {
+            if (row.columns[i] != NoteType::None) p2 = true;
+        }
+        if (p1 && p2) sync_rows++;
+    }
+    
+    double synergy_factor = total_rows > 0 ? (double)sync_rows / total_rows : 0.0;
+    double synergy_stars = synergy_factor * 5.0; // Up to 5 stars for full synchronization
+    
+    // 3. Chaos contribution
+    double chaos_stars = radar.chaos * 0.1; // Max ~2-3 stars
+    
+    // Final Aggregation
+    double total = density_stars + synergy_stars + chaos_stars;
+    
+    // Normalization and Clamping
+    // We want 1.0 to 10.0 range.
+    double r = std::round(total * 2.0) / 2.0; // Round to 0.5
+    
+    if (r < 1.0) r = 1.0;
+    if (r > 10.0) r = 10.0;
+    
     return r;
 }
 

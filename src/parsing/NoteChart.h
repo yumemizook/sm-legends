@@ -91,6 +91,7 @@ struct NoteChart {
 
     RadarValues radar;
     double custom_difficulty = 1.0;      ///< 1.0-30.0 scale (1 decimal)
+    double star_rating = 0.0;           ///< 1.0-10.0 scale (0.5 steps) for Couple/Routine
     ChartVariant variant = ChartVariant::Normal;
     std::string variant_kanji;          ///< Specific Kanji for Wild charts (e.g. 鬼, 狂, 裏)
 

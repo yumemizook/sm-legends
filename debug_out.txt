@@ -1,11 +1,11 @@
-AudioEngine: Some audio decoders unavailable: MP3 support not available
+AudioEngine: Some audio decoders unavailable: FLAC support not available
 AudioEngine: Initialized (freq=44100, channels=2, chunk=1024)
 Noteskin 'Default' loaded successfully.
 Failed to load texture 'sprites/playtype/playercount/routine.png': can't fopen
 Failed to load texture 'sprites/playtype/playercount/couple.png': can't fopen
 Scanning default 'charts' folder...
-SongScanner: Found 73 simfiles in 'charts'
-SongScanner: 73 songs loaded successfully
+SongScanner: Found 19 simfiles in 'charts'
+SongScanner: 19 songs loaded successfully
 
 --- Song Select Controls ---
   Up / Down    : Navigate songs
@@ -29,10 +29,3 @@ SongScanner: 73 songs loaded successfully
 
 Noteskin 'Default' loaded successfully.
 Player 1 joined! (1 active)
-Player 2 joined! (2 active)
-Playing Song Select charts...
-Playing: Machinae Supremacy - Bouff [dance-single Beginner 1]
-AudioEngine: Loaded 'charts\In The Groove\Bouff\Machinae Supremacy - Bouff.ogg'
-AudioEngine: Playing at 0.0000s (raw time from SDL_GetPerformanceCounter)
-Failed to load texture 'charts\In The Groove\Bouff\EV01447N.mpg': can't fopen
-AudioEngine: Music finished

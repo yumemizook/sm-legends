@@ -21,6 +21,7 @@ struct SongEntry {
     std::string title;
     std::string artist;
     std::string jacket_path;        ///< Path to the jacket, cover, or banner image
+    std::string background_path;    ///< Path to the background image
     double      offset = 0.0;
     int         num_charts = 0;
 

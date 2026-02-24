@@ -14,11 +14,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}")
 
-# Manual dependency setup - Bypass vcpkg manifest mode to avoid hangs
-if(EXISTS "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows")
-    set(VCPKG_ROOT "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows")
-else()
+# Manual dependency setup - Prioritize local vcpkg directory
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/installed/x64-windows")
     set(VCPKG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/installed/x64-windows")
+elseif(EXISTS "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows")
+    set(VCPKG_ROOT "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows")
 endif()
 message(STATUS "Using local dependencies from: ${VCPKG_ROOT}")
 
@@ -196,5 +196,9 @@ endif()
 add_executable(test_timing tests/test_timing.cpp)
 target_link_libraries(test_timing PRIVATE sm_engine)
 
+add_executable(test_difficulty tests/test_difficulty.cpp)
+target_link_libraries(test_difficulty PRIVATE sm_engine)
+
 enable_testing()
 add_test(NAME TimingEngineTests COMMAND test_timing)
+add_test(NAME DifficultyCalculationTests COMMAND test_difficulty)

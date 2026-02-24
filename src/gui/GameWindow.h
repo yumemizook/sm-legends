@@ -99,6 +99,13 @@ enum class ComboDisplayMode {
 
 enum class BGABrightness { LIGHTER, NORMAL, DARK, DARKER, DARKEST };
 
+enum class WheelEntryType { Song, Folder };
+struct WheelEntry {
+    WheelEntryType type;
+    int index = -1;      ///< Song index in scanner (if type == Song)
+    std::string label;  ///< Folder name or song title
+};
+
 /// Clear types (per cleartypes.md)
 enum class ClearType {
     NONE,
@@ -365,6 +372,14 @@ private:
     ScreenState target_screen_     = ScreenState::ATTRACTION;
     bool is_transitioning_         = false;
 
+    // --- Screen Countdown Timer ---
+    double screen_countdown_       = 0.0;  ///< Countdown to next screen (0 = disabled)
+    double countdown_anim_         = 0.0;  ///< Per-second pulse animation (1.0 -> 0.0)
+    double timer_limit_            = 99.0; ///< Configurable countdown for Song Select
+    void ResetScreenCountdown();
+    void HandleScreenTimeout();
+    void RenderCountdown();
+
     // --- Update ---
     void Update(double dt);
     void ChangeScreen(ScreenState next);
@@ -558,12 +573,16 @@ private:
 
     SDL_Texture* LoadTexture(const std::string& path, int* w, int* h, bool make_white = false);
 
-    // Song select state
     int  selected_song_  = 0;
-    std::vector<int> filtered_songs_; // Maps wheel index -> scanner index
+    double visual_selected_song_ = 0.0;
+    double visual_scroll_y_ = 0.0;
+    double target_scroll_y_ = 0.0;
+    std::vector<WheelEntry> wheel_entries_; 
+    std::string current_folder_ = ""; ///< "", "MAIN SONGS", "WILD", "CO-OP"
     void UpdateFilteredSongs();
     int  GetFirstValidChart(int song_index) const;
     int  selected_chart_[MAX_PLAYERS] = {0, 0};
+    std::string preferred_difficulty_name_[MAX_PLAYERS];
     int  scroll_offset_  = 0;
     int  visible_songs_  = 12;
     int  preferred_mode_  = 0;  ///< 0 = Single, 1 = Double (toggled by Tab in Song Select)
