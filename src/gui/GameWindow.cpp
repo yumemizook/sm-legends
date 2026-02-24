@@ -515,12 +515,14 @@ void GameWindow::HandleKeyDown(SDL_Keycode key) {
         }
     }
 
+    bool modifier_menu_open = false;
     for (int p = 0; p < MAX_PLAYERS; ++p) {
         if (players_[p].showing_modifier_menu) {
             HandleKeyDown_ModifierMenu(p, key);
-            return;
+            modifier_menu_open = true;
         }
     }
+    if (modifier_menu_open) return;
 
     switch (screen_) {
         case ScreenState::ATTRACTION:      HandleKeyDown_Attraction(key); break;
@@ -966,7 +968,7 @@ void GameWindow::HandleModifierMenuInput(int p, SDL_Keycode key) {
                 ps.ex_mode = !ps.ex_mode;
                 break;
             case 9: // Center 1P
-                if (p == 0) {
+                if (p == 0 && num_active_players_ <= 1) {
                     center_1p_ = !center_1p_;
                     SetupPlayerFieldLayout();
                 }
@@ -3024,7 +3026,6 @@ void GameWindow::SetupPlayerFieldLayout() {
     if (num_active_players_ <= 1) {
         // Single player: align based on side choice + centering option
         for (int i = 0; i < MAX_PLAYERS; ++i) {
-            players_[i].field_config = field_config_;
             if (players_[i].joined) {
                 if (center_1p_ || num_cols > 4) {
                     // Center it for 1P centered mode or for 8-lane doubles/couple/routine
@@ -3039,9 +3040,8 @@ void GameWindow::SetupPlayerFieldLayout() {
             }
         }
     } else {
-        // Two players
+        // Two players: only update field_x_offset, preserve per-player scroll settings
         for (int i = 0; i < MAX_PLAYERS; ++i) {
-            players_[i].field_config = field_config_;
             if (num_cols > 4) {
                 // For 8-lane modes (Couple/Routine), both players share/center the field
                 players_[i].field_x_offset = 0;
@@ -4031,14 +4031,17 @@ SDL_Texture* GameWindow::GetJacketTexture(const std::string& path) {
     if (it != jacket_cache_.end()) return it->second;
 
     // Verify file exists before loading
-    if (!std::filesystem::exists(path)) return nullptr;
+    if (!std::filesystem::exists(path)) {
+        // Cache the miss so we don't hit the disk again every frame
+        jacket_cache_[path] = nullptr;
+        return nullptr;
+    }
 
     // Load new texture
     int w, h;
     SDL_Texture* tex = LoadTexture(path, &w, &h);
-    if (tex) {
-        jacket_cache_[path] = tex;
-    }
+    // Cache result (even nullptr on load failure) to avoid retrying
+    jacket_cache_[path] = tex;
     return tex;
 }
 

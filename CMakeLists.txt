@@ -8,6 +8,12 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}")
+
 # Manual dependency setup - Bypass vcpkg manifest mode to avoid hangs
 if(EXISTS "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows")
     set(VCPKG_ROOT "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows")
